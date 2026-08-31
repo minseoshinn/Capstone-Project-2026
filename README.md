@@ -164,50 +164,6 @@ connectivity loss. Repeated parcels to the same building or adjacent complex are
 grouped into a single visit, to avoid double-counting travel when summing per-parcel
 energy.
 
-Field data is not committed to this repository. Courier identifiers are pseudonymized,
-and only body mass, height, age, sex, delivery records, and IMU signals were collected
+Courier identifiers are pseudonymized, and only body mass, height, age, sex, delivery records, and IMU signals were collected
 — no heart rate, blood pressure, or other physiological or sensitive health data.
-
----
-
-## Limitations
-
-Stated plainly, because they define what this system does not yet establish.
-
-**The routing improvement is self-scored.** Improvement is currently measured by the
-same cost function the routes were optimized against. Independent validation requires
-a within-subject crossover on identical volume, with distance, elapsed time, vertical
-ascent, TRIMP, and peak %HRR as outcomes, paired Wilcoxon tests, and effect sizes.
-Designed, not yet run.
-
-**No physiological ground truth for the energy estimate.** Predicted and measured
-energy diverge systematically in both directions: measured exceeds predicted when
-sensors accumulate during waiting or the classifier misfires; predicted exceeds
-measured on stair carries, where the formula applies a load-inclusive MET of 8–12
-while the wrist signal registers only 3–5. Resolving this needs HR-derived VO₂ or a
-portable indirect calorimeter, then Bland–Altman agreement analysis and per-activity
-calibration coefficients.
-
-**Single courier, single region.** One courier identifier, one campus and its adjacent
-blocks. The system logic generalizes through personal parameters, but the validation
-does not.
-
-**Phone placement.** Couriers carry phones in hand, pocket, or bag, and the classifier
-was validated on a limited set of placements.
-
----
-
-## Sources
-
-Ainsworth et al. (2011) Compendium of Physical Activities · Soule & Goldman (1969)
-load coefficient · DuBois & DuBois (1916) body surface area · ISO 8996 metabolic rate
-classification · Stull (2011) wet-bulb approximation · ISO 7243 WBGT · NIOSH work/rest
-tables (Pub. 2017-127) and heat exposure criteria (2016) · KOSHA GUIDE W-12-2017 and
-M-46-2012 · Waters et al. (1994) NIOSH lifting equation · Snook & Ciriello (1991) ·
-Mital et al. (1993) · Visentin (2018) fatigue accumulation and recovery · Harris–Benedict
-(revised) BMR · Gashi et al. (2022) WEEE dataset · Stisen et al. (2015) HHAR
-
-## Contact
-
-Minseo Shin — hh7352913@gmail.com
-Department of Industrial and Management Engineering, Hankuk University of Foreign Studies
+ 
