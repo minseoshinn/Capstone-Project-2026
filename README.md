@@ -123,9 +123,9 @@ weights, stair-carry limits (Mital et al. 1993), and MOEL Notice 2020-12.
 
 ## Field data
 
-Four days shadowing a Coupang Quick-Flex courier across a university campus and
-adjacent apartment and low-rise residential blocks. **141 delivery records and 35
-building records** (floor count, elevator presence, GPS coordinates, parcel count and
+Four days shadowing a CJ logistics courier across a university campus and
+adjacent apartment and low-rise residential blocks. 431 delivery records and 35
+building records (floor count, elevator presence, GPS coordinates, parcel count and
 weight) collected as a full enumeration rather than a sample.
 
 Predicted energy was then computed over **431 deliveries across four delivery dates**,
