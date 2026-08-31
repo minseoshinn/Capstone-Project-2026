@@ -1,0 +1,1694 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>과로제로 — Admin Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;800&family=DM+Mono:wght@400;500&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#f8fafc;--surface:#fff;--border:#e2e8f0;--t1:#0f172a;--t2:#475569;--t3:#94a3b8;--blue:#2563eb;--green:#059669;--amber:#d97706;--red:#dc2626;--purple:#7c3aed;--r:12px;--sh:0 1px 3px rgba(0,0,0,.06)}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh}
+.app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+/* Sidebar */
+.sb{background:var(--surface);border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.sb-logo{font-size:20px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.sb-logo span{font-size:10px;background:var(--green);color:#fff;border-radius:4px;padding:2px 6px;font-weight:600}
+.sb-btn{border:none;background:var(--bg);padding:10px 12px;border-radius:10px;cursor:pointer;text-align:left;font-weight:600;font-size:13px;font-family:inherit;color:var(--t2);transition:all .15s;display:flex;align-items:center;gap:8px}
+.sb-btn:hover{background:#e2e8f0}
+.sb-btn.on{background:var(--blue);color:#fff}
+.sb-divider{height:1px;background:var(--border);margin:8px 0}
+.sb-info{font-size:10px;color:var(--t3);line-height:1.6;padding:8px;margin-top:auto}
+/* Main */
+.main{padding:24px;overflow-x:hidden}
+.page{display:none}.page.active{display:block}
+/* Top bar */
+.topbar{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.topbar h1{font-size:22px;font-weight:800}
+.topbar p{font-size:12px;color:var(--t3);margin-top:2px}
+.live-chip{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:11px;font-weight:600;color:var(--t2)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;box-shadow:var(--sh)}
+.kpi-label{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px}
+.kpi-val{font-size:22px;font-weight:800;font-family:'DM Mono',monospace}
+.kpi-sub{font-size:10px;color:var(--t3);margin-top:2px}
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--sh)}
+.card h3{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+/* Layout */
+.grid-2{display:grid;grid-template-columns:380px 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+/* Table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px;font-size:11px;color:var(--t3);border-bottom:1px solid var(--border);font-weight:600;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.row-click{cursor:pointer;transition:background .1s}
+.row-click:hover{background:#fffbeb}
+/* Badge */
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.b-ok{background:#dcfce7;color:#166534}.b-warn{background:#fef3c7;color:#92400e}
+.b-danger{background:#fee2e2;color:#991b1b}.b-info{background:#dbeafe;color:#1e40af}
+/* Alert */
+.alert-card{padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px}
+.alert-red{background:#fee2e2;color:#991b1b}.alert-amber{background:#fef3c7;color:#92400e}
+.alert-green{background:#dcfce7;color:#166534}
+/* Detail grid */
+.d-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0}
+.d-cell{background:var(--bg);border-radius:8px;padding:10px 12px}
+.d-cell-label{font-size:10px;color:var(--t3);margin-bottom:4px;font-weight:600}
+.d-cell-val{font-size:14px;font-weight:700}
+/* Courier profile */
+.profile{display:flex;align-items:center;gap:14px;padding:12px;background:var(--bg);border-radius:10px;margin-bottom:16px}
+.avatar{width:48px;height:48px;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex-shrink:0}
+.profile-info{flex:1}
+.profile-name{font-size:16px;font-weight:800}
+.profile-sub{font-size:11px;color:var(--t3)}
+/* Heatmap embed */
+.heatmap-frame{width:100%;height:700px;border:none;border-radius:var(--r);background:var(--bg);margin-top:12px}
+/* Responsive */
+@media(max-width:1000px){.app{grid-template-columns:1fr}.sb{display:none}.grid-2{grid-template-columns:1fr}}
+
+/* SB-Admin style chart cards */
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
+.chart-card-head{padding:14px 18px;border-bottom:1px solid var(--border);background:#fafbfc;display:flex;justify-content:space-between;align-items:center}
+.chart-card-head h4{font-size:13px;font-weight:700;color:var(--t1);letter-spacing:.2px}
+.chart-card-head .meta{font-size:10px;color:var(--t3)}
+.chart-card-body{padding:16px 18px}
+.chart-canvas-wrap{position:relative;height:260px;width:100%}
+.chart-canvas-wrap.tall{height:320px}
+.chart-canvas-wrap.short{height:200px}
+/* KPI cards in the SB-Admin colour bar */
+.kpi-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi-card{background:var(--surface);border-radius:var(--r);border-left:5px solid var(--blue);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;box-shadow:var(--sh)}
+.kpi-card .kpi-content{flex:1}
+.kpi-card .kpi-tag{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--blue);text-transform:uppercase}
+.kpi-card .kpi-big{font-size:22px;font-weight:800;color:var(--t1);margin-top:4px}
+.kpi-card .kpi-sub{font-size:10px;color:var(--t3);margin-top:2px}
+.kpi-card .kpi-icon{font-size:28px;opacity:.35}
+.kpi-card.green{border-left-color:var(--green)} .kpi-card.green .kpi-tag{color:var(--green)}
+.kpi-card.amber{border-left-color:var(--amber)} .kpi-card.amber .kpi-tag{color:var(--amber)}
+.kpi-card.red  {border-left-color:var(--red)}   .kpi-card.red   .kpi-tag{color:var(--red)}
+@media(max-width:900px){.kpi-bar{grid-template-columns:repeat(2,1fr)}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sb">
+  <div class="sb-logo">📦 과로제로 <span>ADMIN</span></div>
+  <button class="sb-btn on" onclick="showPage('overview')">📊 실시간 관제</button>
+  <button class="sb-btn" onclick="showPage('couriers')">👤 배송기사 관리</button>
+  <button class="sb-btn" onclick="showPage('records')">📅 일별 기록</button>
+  <button class="sb-btn" onclick="showPage('datasets')">📦 배송 데이터셋</button>
+  <button class="sb-btn" onclick="showPage('alerts')">🚨 위험 알림</button>
+  <button class="sb-btn" onclick="showPage('settings')">⚙️ 시스템 설정</button>
+  <div class="sb-divider"></div>
+  <button class="sb-btn" onclick="refreshAll()" style="color:var(--green)">🔄 데이터 새로고침</button>
+  <div class="sb-info">
+    과로제로 3.0
+  </div>
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+
+<!-- ─── PAGE: OVERVIEW ─── -->
+<div class="page active" id="pg-overview">
+  <div class="topbar">
+    <div><h1>대시보드</h1><p>실제 수집·저장된 배송 데이터 기반 에너지 소비 통계 · 경로 준수 효과 분석</p></div>
+    <div class="live-chip"><div class="live-dot"></div><span id="live-time">—</span> · 실시간 동기화</div>
+  </div>
+
+  <!-- 데이터 출처 배너 -->
+  <div id="data-source-banner" style="margin:0 0 10px;padding:8px 12px;border-radius:8px;font-size:12px;font-weight:600;display:none"></div>
+
+  <!-- 핵심 통계 KPI (SB-Admin coloured cards) -->
+  <div class="kpi-bar" id="kpi-bar"></div>
+
+  <!-- 실측 데이터 기반 자동 인사이트 (저장된 근무기록 /records 우선) -->
+  <div id="insights-panel" style="margin:0 0 18px;display:none"></div>
+
+  <!-- Row 1: line chart (energy trend) + donut (route distribution) -->
+  <div class="grid-2" style="grid-template-columns:2fr 1fr;gap:16px;margin-bottom:18px">
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>📈 일별 에너지 소비 추이 — 권장 경로 vs 미준수</h4>
+        <div class="meta">단위: kcal · 66kg 기준 Compendium 2011</div>
+      </div>
+      <div class="chart-card-body">
+        <div class="chart-canvas-wrap"><canvas id="chart-energy-trend"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>🛣 경로별 박스 분포</h4>
+        <div class="meta">교내 / 410C02 / 410B01</div>
+      </div>
+      <div class="chart-card-body">
+        <div class="chart-canvas-wrap"><canvas id="chart-route-mix"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: stacked savings bars + WSI line -->
+  <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>💪 일별 경로 준수 절감량 (kcal)</h4>
+        <div class="meta">미준수 − 권장 차이 · Compendium 모델 추정(예측)</div>
+      </div>
+      <div class="chart-card-body">
+        <div class="chart-canvas-wrap"><canvas id="chart-savings"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>⚡ 일별 최대 WSI (작업부하 지수)</h4>
+        <div class="meta">0.8 주의 · 1.0 경고 · 1.2 위험 (ISO 8996)</div>
+      </div>
+      <div class="chart-card-body">
+        <div class="chart-canvas-wrap"><canvas id="chart-wsi"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 3: building-load horizontal bar + daily table -->
+  <div class="grid-2" style="grid-template-columns:3fr 2fr;gap:16px;margin-bottom:18px">
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>🏢 건물별 누적 에너지 부담 TOP 10</h4>
+        <div class="meta">건물 1회 방문 에너지 · 실데이터×모델 (예측)</div>
+      </div>
+      <div class="chart-card-body">
+        <div class="chart-canvas-wrap tall"><canvas id="chart-bldg-load"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-head">
+        <h4>📦 일별 상세</h4>
+        <div class="meta">박스·WSI·근무시간</div>
+      </div>
+      <div class="chart-card-body" id="daily-table"></div>
+    </div>
+  </div>
+
+  <!-- 월간 누적 통계 -->
+  <div class="card" style="margin-top:8px;margin-bottom:16px">
+    <h3>🗓️ 월간 누적 통계 (수집 기간 합계)</h3>
+    <div class="d-grid" id="monthly-grid"></div>
+  </div>
+
+  <!-- 실시간 관제 -->
+  <div class="grid-2" style="margin-top:16px">
+    <div>
+      <div class="card">
+        <h3>🚚 실시간 배송기사 현황</h3>
+        <table><thead><tr><th>ID</th><th>이름</th><th>배송지역</th><th>진행</th><th>WSI</th><th>상태</th></tr></thead>
+        <tbody id="courier-tbody"></tbody></table>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3>🚨 실시간 알림</h3>
+        <div id="alerts-list"></div>
+      </div>
+    </div>
+
+    <div class="card" id="detail-panel">
+      <h3>👤 기사 상세 정보</h3>
+      <p style="color:var(--t3);font-size:12px">왼쪽에서 배송기사를 클릭하면 상세 정보가 표시됩니다.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PAGE: COURIERS ─── -->
+<div class="page" id="pg-couriers">
+  <div class="topbar"><div><h1>👤 배송기사 관리</h1><p>등록된 기사 프로필 · 근무 이력 · 신체 정보</p></div></div>
+  <div id="courier-profiles"></div>
+</div>
+
+<!-- ─── PAGE: DAILY RECORDS ─── -->
+<div class="page" id="pg-records">
+  <div class="topbar">
+    <div><h1>📅 일별 업무 기록</h1><p>배송기사가 앱의 기록 탭에서 저장한 날짜별 데이터</p></div>
+    <button onclick="loadRecords()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">🔄 새로고침</button>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>📆 저장된 날짜</h3>
+      <div id="rec-date-list"><p style="color:var(--t3);font-size:12px">불러오는 중…</p></div>
+    </div>
+    <div class="card" id="rec-detail">
+      <h3>📋 상세</h3>
+      <p style="color:var(--t3);font-size:12px">왼쪽에서 날짜를 선택하면 해당 일의 배송·에너지·WSI 기록이 표시됩니다.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PAGE: DELIVERY DATASETS ─── -->
+<div class="page" id="pg-datasets">
+  <div class="topbar">
+    <div><h1>📦 배송 데이터셋 (4건)</h1><p>쿠팡 × 5/28 · 5/29 · 6/1 · 6/2 — 서버에 적재된 배송정보</p></div>
+    <button onclick="loadDatasets()" style="padding:8px 14px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">🔄 새로고침</button>
+  </div>
+  <div class="kpis" id="ds-kpi"></div>
+  <div class="grid-2">
+    <div class="card">
+      <h3>📋 데이터셋 목록</h3>
+      <div id="ds-list"><p style="color:var(--t3);font-size:12px">불러오는 중…</p></div>
+    </div>
+    <div class="card">
+      <h3>🗺️ 히트맵 미리보기 (기존 + 최적 5루트)</h3>
+      <p style="font-size:11px;color:var(--t3);margin-bottom:8px">데이터셋을 선택하면 해당 회사·날짜의 부하로 히트맵이 갱신됩니다.</p>
+      <iframe id="ds-heatmap-iframe" class="heatmap-frame" style="height:560px" src="about:blank"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PAGE: ALERTS ─── -->
+<div class="page" id="pg-alerts">
+  <div class="topbar"><div><h1>🚨 위험 알림 이력</h1><p>WSI 초과 · NIOSH REL 초과 · 연속근무 경고</p></div></div>
+  <div id="alert-history"></div>
+</div>
+
+<!-- ─── PAGE: SETTINGS ─── -->
+<div class="page" id="pg-settings">
+  <div class="topbar"><div><h1>⚙️ 시스템 설정</h1><p>서버 연결 · 데이터 관리 · 연구 근거</p></div></div>
+  <div class="grid-3">
+    <div class="card">
+      <h3>🔌 서버 연결</h3>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:8px">ML서버 (server.py) + SQL서버 URL</div>
+      <input id="set-srv" type="url" placeholder="https://xxxx.ngrok-free.app" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:8px">
+      <button onclick="saveSrvUrl()" style="width:100%;padding:8px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">저장</button>
+      <div id="set-status" style="margin-top:8px;font-size:11px;color:var(--t3)"></div>
+    </div>
+    <div class="card">
+      <h3>📊 데이터 관리</h3>
+      <button onclick="clearAllSync()" style="width:100%;padding:8px;background:var(--red);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:8px">🗑️ 동기화 데이터 초기화</button>
+      <button onclick="exportData()" style="width:100%;padding:8px;background:var(--green);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-family:inherit">📥 데이터 내보내기 (JSON)</button>
+    </div>
+    <div class="card">
+      <h3>📚 연구 근거</h3>
+      <div style="font-size:10px;color:var(--t2);line-height:1.8">
+        • Ainsworth 2011 Compendium (MET)<br>
+        • NIOSH 2016 Pub. 2016-106 (REL/RAL)<br>
+        • ISO 8996:2004 (E_limit 165W/m²)<br>
+        • DuBois 1916 (BSA)<br>
+        • Soule & Goldman 1969 (C_load)<br>
+        • Stull 2011 (WBGT)<br>
+        • Yoo et al. 2024 PMC10944155<br>
+        • Åstrand et al. 1986 (fatigue)<br>
+        • Visentin 2018 (route optimization)
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  COURIER DATABASE  
+const COURIERS = {
+  'CP-10291': {
+    id:'CP-10291', name:'황태웅', avatar:'황', gender:'male',
+    weight:66, height:171, age:26, bmr:1646,
+    area:'한국외대 글로벌캠퍼스 + 왕산리 자취촌', vehicle:'쿠팡 1톤 탑차',
+    phone:'010-1234-5678', startDate:'2024-03-15',
+    note:'주 배송기사 — 캡스톤 프로젝트 모니터링 대상자'
+  }
+}; 
+const DAILY_STATS = [
+  { date:'2026-05-28', boxes:131, buildings:14, kcalFollow:332.6, kcalNoFollow:1049.0, maxWsi:0.94, shiftMin:296,
+    routes:{ '교내':131 } },
+  { date:'2026-05-29', boxes:77,  buildings:13, kcalFollow:224.1, kcalNoFollow:597.6,  maxWsi:0.71, shiftMin:214,
+    routes:{ '교내':77 } },
+  { date:'2026-06-01', boxes:127, buildings:14, kcalFollow:310.4, kcalNoFollow:954.0,  maxWsi:0.90, shiftMin:288,
+    routes:{ '교내':127 } },
+  { date:'2026-06-02', boxes:185, buildings:24, kcalFollow:412.5, kcalNoFollow:1297.8, maxWsi:0.96, shiftMin:342,
+    routes:{ '교내':131, '410C02':18, '410B01':36 } },
+];
+
+ 
+const KIM_DELIVERIES = [
+  {trackingId:'10295825340001', dest:'기숙사_E동 보관소',       floor:1, weightKg:3.5, count:6, type:'택배', elevator:false},
+  {trackingId:'10295825340002', dest:'기숙사_D동 보관소',       floor:1, weightKg:4.0, count:2, type:'택배', elevator:false},
+  {trackingId:'10295825340003', dest:'기숙사_A동 보관소',       floor:1, weightKg:3.5, count:5, type:'택배', elevator:true},
+  {trackingId:'10295825340004', dest:'기숙사_B동 보관소',       floor:1, weightKg:4.0, count:3, type:'택배', elevator:true},
+  {trackingId:'10295825340005', dest:'기숙사_C동 보관소',       floor:1, weightKg:3.5, count:4, type:'택배', elevator:true},
+  {trackingId:'10295825340006', dest:'학생회관 1층 택배함',     floor:1, weightKg:4.5, count:2, type:'택배', elevator:false},
+  {trackingId:'10295825340007', dest:'어문학관 3층 302호',      floor:3, weightKg:1.5, count:1, type:'서류', elevator:false},
+  {trackingId:'10295825340008', dest:'인문경상관 2층 보관소',   floor:1, weightKg:3.0, count:2, type:'택배', elevator:false},
+  {trackingId:'10295825340009', dest:'교양관 1층 보관소',       floor:1, weightKg:3.5, count:4, type:'택배', elevator:true},
+  {trackingId:'10295825340010', dest:'후생복지관 1층 택배함',   floor:1, weightKg:3.0, count:3, type:'택배', elevator:false},
+  {trackingId:'10295825340011', dest:'공학관 4층 401호',        floor:4, weightKg:5.0, count:2, type:'택배', elevator:false},
+  {trackingId:'10295825340012', dest:'창업보육센터 1층 보관소', floor:1, weightKg:1.0, count:1, type:'서류', elevator:false},
+  {trackingId:'10295825340013', dest:'자연과학관 3층 실험실',   floor:3, weightKg:8.0, count:3, type:'실험기자재', elevator:true},
+  {trackingId:'10295825340014', dest:'백년관 7층 702호',        floor:7, weightKg:4.5, count:3, type:'택배', elevator:true},
+ 
+  {trackingId:'10320585340004', dest:'쉐르빌 410호', floor:4, weightKg:1.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320585424555', dest:'쉐르빌 경비실', floor:1, weightKg:0.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320548617352', dest:'왕산오피스텔 104호', floor:1, weightKg:0.2, count:1, type:'택배', elevator:false},
+  {trackingId:'10320548792416', dest:'왕산오피스텔 301호', floor:3, weightKg:1.0, count:3, type:'택배', elevator:false},
+  {trackingId:'10320562174835', dest:'성안원룸 101호', floor:1, weightKg:0.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320562391574', dest:'성안원룸 102호', floor:1, weightKg:0.3, count:1, type:'택배', elevator:false},
+  {trackingId:'10320574182635', dest:'성안원룸 103호', floor:1, weightKg:0.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320574295816', dest:'성안원룸 201호', floor:2, weightKg:0.2, count:1, type:'택배', elevator:false},
+  {trackingId:'10320585371824', dest:'성안원룸 202호', floor:2, weightKg:0.3, count:1, type:'택배', elevator:false},
+  {trackingId:'10320585492735', dest:'성안원룸 301호', floor:3, weightKg:0.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320548527193', dest:'성안원룸 302호', floor:3, weightKg:7.0, count:1, type:'택배', elevator:false},
+  {trackingId:'10320562483715', dest:'성안원룸 302호', floor:3, weightKg:0.2, count:1, type:'택배', elevator:false},
+  {trackingId:'10320574359128', dest:'그린빌 402호', floor:4, weightKg:3.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320585627419', dest:'그린빌 305호', floor:3, weightKg:5.5, count:2, type:'택배', elevator:false},
+  {trackingId:'10320562139584', dest:'로즈빌 301호', floor:3, weightKg:9.1, count:2, type:'택배', elevator:false},
+  {trackingId:'10320548682473', dest:'애버빌 304호', floor:3, weightKg:0.5, count:1, type:'택배', elevator:false},
+  {trackingId:'10320537542675', dest:'애버빌 405호', floor:4, weightKg:0.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320585468127', dest:'로즈빌 202호', floor:2, weightKg:0.2, count:1, type:'택배', elevator:false},
+  {trackingId:'10320574217395', dest:'훕스테이 1층', floor:1, weightKg:4.1, count:2, type:'택배', elevator:false},
+  {trackingId:'10320562458173', dest:'하우스블라썸 1층', floor:1, weightKg:0.5, count:1, type:'택배', elevator:false},
+  {trackingId:'10320516847295', dest:'동일빌딩 402호', floor:4, weightKg:2.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320529381467', dest:'동일하이빌 203호', floor:2, weightKg:1.1, count:1, type:'택배', elevator:false},
+  {trackingId:'10320586471234', dest:'스위첸KCC 101동 801호', floor:8, weightKg:0.2, count:1, type:'택배', elevator:true},
+  {trackingId:'10320591843765', dest:'스위첸KCC 101동 1101호', floor:11, weightKg:1.1, count:1, type:'택배', elevator:true},
+  {trackingId:'10320574218593', dest:'스위첸KCC 101동 1202호', floor:12, weightKg:0.4, count:2, type:'택배', elevator:true},
+  {trackingId:'10320568392418', dest:'스위첸KCC 101동 1501호', floor:15, weightKg:2.3, count:1, type:'택배', elevator:true},
+  {trackingId:'10320557184276', dest:'스위첸KCC 102동 402호', floor:4, weightKg:0.1, count:1, type:'택배', elevator:true},
+  {trackingId:'10320589631547', dest:'스위첸KCC 102동 603호', floor:6, weightKg:0.8, count:3, type:'택배', elevator:true},
+  {trackingId:'10320573468125', dest:'스위첸KCC 102동 1001호', floor:10, weightKg:1.7, count:1, type:'택배', elevator:true},
+  {trackingId:'10320562847153', dest:'스위첸KCC 102동 1301호', floor:13, weightKg:0.3, count:2, type:'택배', elevator:true},
+  {trackingId:'10320595718364', dest:'스위첸KCC 102동 1302호', floor:13, weightKg:0.5, count:1, type:'택배', elevator:true},
+  {trackingId:'10320581472958', dest:'스위첸KCC 103동 301호', floor:3, weightKg:0.2, count:1, type:'택배', elevator:true},
+  {trackingId:'10320569341827', dest:'스위첸KCC 103동 502호', floor:5, weightKg:1.4, count:2, type:'택배', elevator:true},
+  {trackingId:'10320574293615', dest:'스위첸KCC 103동 702호', floor:7, weightKg:0.7, count:1, type:'택배', elevator:true},
+  {trackingId:'10320558147294', dest:'스위첸KCC 103동 803호', floor:8, weightKg:0.9, count:1, type:'택배', elevator:true},
+  {trackingId:'10320586317425', dest:'스위첸KCC 103동 901호', floor:9, weightKg:3.1, count:3, type:'택배', elevator:true},
+  {trackingId:'10320571958361', dest:'스위첸KCC 103동 902호', floor:9, weightKg:0.2, count:1, type:'택배', elevator:true},
+  {trackingId:'10320564281734', dest:'스위첸KCC 103동 1201호', floor:12, weightKg:1.8, count:2, type:'택배', elevator:true},
+  {trackingId:'10320589572146', dest:'스위첸KCC 103동 1402호', floor:14, weightKg:0.4, count:1, type:'택배', elevator:true},
+  {trackingId:'10320573419582', dest:'스위첸KCC 104동 403호', floor:4, weightKg:0.6, count:1, type:'택배', elevator:true},
+  {trackingId:'10320568142937', dest:'스위첸KCC 104동 702호', floor:7, weightKg:2.1, count:1, type:'택배', elevator:true},
+  {trackingId:'10320557294815', dest:'스위첸KCC 104동 1001호', floor:10, weightKg:0.3, count:2, type:'택배', elevator:true},
+  {trackingId:'10320584716328', dest:'스위첸KCC 104동 1302호', floor:13, weightKg:1.2, count:1, type:'택배', elevator:true},
+  {trackingId:'10320579428156', dest:'스위첸KCC 105동 302호', floor:3, weightKg:0.5, count:1, type:'택배', elevator:true},
+  {trackingId:'10320563817542', dest:'스위첸KCC 105동 402호', floor:4, weightKg:0.1, count:2, type:'택배', elevator:true},
+  {trackingId:'10320591284763', dest:'스위첸KCC 105동 403호', floor:4, weightKg:0.8, count:1, type:'택배', elevator:true},
+  {trackingId:'10320575193624', dest:'스위첸KCC 105동 802호', floor:8, weightKg:4.2, count:3, type:'택배', elevator:true},
+  {trackingId:'10320568472913', dest:'스위첸KCC 105동 1201호', floor:12, weightKg:0.4, count:1, type:'택배', elevator:true},
+  {trackingId:'10320557361845', dest:'스위첸KCC 105동 1502호', floor:15, weightKg:1.5, count:2, type:'택배', elevator:true},
+  {trackingId:'10320582649178', dest:'스위첸KCC 106동 502호', floor:5, weightKg:0.2, count:1, type:'택배', elevator:true},
+  {trackingId:'10320574821536', dest:'스위첸KCC 106동 601호', floor:6, weightKg:0.7, count:1, type:'택배', elevator:true},
+  {trackingId:'10320569184725', dest:'스위첸KCC 106동 602호', floor:6, weightKg:2.8, count:2, type:'택배', elevator:true},
+  {trackingId:'10320583572941', dest:'스위첸KCC 106동 903호', floor:9, weightKg:0.3, count:1, type:'택배', elevator:true},
+  {trackingId:'10320576418253', dest:'스위첸KCC 106동 1101호', floor:11, weightKg:1.0, count:1, type:'택배', elevator:true},
+];
+ 
+const _SWITCHEN_RE = /스위첸[\s_·]*(?:kcc)?[\s_·]*(\d{2,3})\s*동/i;
+function stairCarryMet(loadKg) {
+  const lbs = loadKg * 2.205;
+  if (lbs <= 15)  return 5.0;   // code 17026
+  if (lbs <= 24)  return 6.0;   // code 17027
+  if (lbs <= 49)  return 8.0;   // code 17028
+  if (lbs <= 74)  return 10.0;  // code 17029
+  return 12.0;                  // code 17030
+}
+
+function flatCarryMet(loadKg) { 
+  if (loadKg < 6.8)  return 3.5;  // code 11795
+  if (loadKg < 11.3) return 4.5;  // code 11800
+  return 5.0;                     // code 11820: walking carrying 25-49 lb
+}
+ 
+const CART_KG = 15;
+const WALK_FACTOR = 0.8;   // 도보 20% 단축(배달기사 빠른 보행)
+function delivPhases(d) {
+  const loadKg     = d.pkgWeightKg * d.pkgCount;
+  const floorAbove = Math.max(d.floor - 1, 0);
+  const useCart    = (d.useCart != null) ? !!d.useCart : (loadKg >= CART_KG);
+  const approachMet = useCart ? 4.0 : flatCarryMet(loadKg);
+  const phases     = [];
+
+  if (d.floor === 1) {
+    const dur = Math.max((1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, 1.0);
+    phases.push({ met: approachMet, durMin: dur, label: useCart ? '평지 이동(카트)' : '평지 이동(하중)' });
+
+  } else if (d.hasElevator) {
+    phases.push({ met: approachMet, durMin: 1.5 * WALK_FACTOR, label: useCart ? '현관→엘베(카트)' : '현관→엘베(하중)' });
+    phases.push({ met: 1.3, durMin: 0.5 + 0.3 * d.floor, label: '엘리베이터(상행)' });
+    phases.push({ met: flatCarryMet(loadKg), durMin: (1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, label: '호수까지(하중)' });
+
+  } else {
+    phases.push({ met: approachMet, durMin: 1.5 * WALK_FACTOR, label: useCart ? '현관→계단(카트)' : '현관→계단(하중)' });
+    phases.push({ met: stairCarryMet(loadKg), durMin: 1.5 * floorAbove, label: '계단 오르기(하중)' });
+    phases.push({ met: flatCarryMet(loadKg), durMin: (1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, label: '호수까지(하중)' });
+  }
+
+  const totalDurMin = Math.max(phases.reduce((s, p) => s + p.durMin, 0), 1.0);
+  const avgMet      = totalDurMin > 0
+    ? phases.reduce((s, p) => s + p.met * p.durMin, 0) / totalDurMin
+    : 3.5;
+  return { phases, totalDurMin, avgMet };
+}
+
+// 건물 1회 방문 에너지(J) — 그룹/엘베거점 모델. boxes:[{floor,hasElevator,pkgCount,pkgWeightKg}]
+function buildingVisitEnergyJ(boxes, uw, forceCart) {
+  const items = (boxes || []).filter(Boolean);
+  if (!items.length) return 0;
+  const W = uw || 66;
+  const E  = (met, min) => met * W * (min / 60) * 4184;
+  const Ec = (met, min, loadKg) => { const C = (loadKg>0)?1+(0.5*loadKg/W):1.0; return met * C * W * (min/60) * 4184; };
+  const byFloor = {};
+  items.forEach(d => {
+    const f = +d.floor || 1;
+    if (!byFloor[f]) byFloor[f] = { floor: f, hasElevator: !!d.hasElevator, boxes: 0, wt: 0 };
+    byFloor[f].boxes += (+d.pkgCount || 1);
+    byFloor[f].wt    += (+d.pkgWeightKg || 0) * (+d.pkgCount || 1);
+    byFloor[f].hasElevator = byFloor[f].hasElevator || !!d.hasElevator;
+  });
+  const floors = Object.values(byFloor).sort((a, b) => a.floor - b.floor);
+  const totLoad = items.reduce((s, d) => s + (+d.pkgWeightKg || 0) * (+d.pkgCount || 1), 0);
+  const useCart = (forceCart != null) ? !!forceCart : (totLoad >= CART_KG);
+  const approachMet = useCart ? 4.0 : flatCarryMet(totLoad);
+  const hasElev  = floors.some(f => f.hasElevator);
+  const maxFloor = Math.max(...floors.map(f => f.floor));
+  let J = 0;
+  if (maxFloor === 1) {
+    const min = Math.max((1.5 + 0.15 * floors[0].boxes) * WALK_FACTOR, 1.0);
+    J += useCart ? E(approachMet, min) : Ec(approachMet, min, totLoad);
+    return Math.round(J);
+  }
+  if (hasElev) {
+    J += useCart ? E(approachMet, 1.5 * WALK_FACTOR) : Ec(approachMet, 1.5 * WALK_FACTOR, totLoad);
+    J += E(1.3, 0.5 + 0.3 * maxFloor);
+    floors.forEach(f => { J += Ec(flatCarryMet(f.wt), (1.5 + 0.15 * f.boxes) * WALK_FACTOR, f.wt); });
+    return Math.round(J);
+  }
+  J += useCart ? E(approachMet, 1.5 * WALK_FACTOR) : Ec(approachMet, 1.5 * WALK_FACTOR, totLoad);
+  floors.forEach(f => {
+    const fa = Math.max(f.floor - 1, 0);
+    J += E(stairCarryMet(f.wt), 1.5 * fa);
+    J += Ec(flatCarryMet(f.wt), (1.5 + 0.15 * f.boxes) * WALK_FACTOR, f.wt);
+  });
+  return Math.round(J);
+}
+
+function calcPred(d, uw) { 
+  const loadKg  = d.pkgWeightKg * d.pkgCount;
+  const { phases } = delivPhases(d);
+  let totalE = 0;
+  for (const ph of phases) {
+    const isStairCarry = ph.label === '계단 오르기(하중)';
+    const isCart       = ph.label.includes('카트');
+    const isCarry      = ph.label.includes('하중');
+    const Cload = (!isStairCarry && !isCart && isCarry && loadKg > 0)
+      ? 1 + (0.5 * loadKg / uw) : 1.0;   // Soule & Goldman(1969)
+    totalE += ph.met * Cload * uw * (ph.durMin / 60) * 4184;
+  }
+  return Math.round(totalE);
+}
+
+function extractBuilding(addr) {
+  // Strip unit: trim from first occurrence of digits followed by 호/동/실/층
+  const m = addr.match(/^(.+?)\s*\d+[호동실층]/);
+  return m ? m[1].trim() : addr;
+}
+ 
+function courierBodyW() {
+  let w = 0;
+  try { w = parseFloat(localStorage.getItem('courier_weight_kg') || '0'); } catch (e) {}
+  if (w && w > 0) return w;
+  return (COURIERS['CP-10291'] && COURIERS['CP-10291'].weight) || 66;
+}
+
+function normalizeBuilding(name) {
+  if (!name) return '';
+  const s = String(name).trim();
+  const m = s.match(_SWITCHEN_RE);
+  if (m) return `스위첸KCC ${m[1]}동`;
+  if (s === '에버빌') return '애버빌';
+  return s;
+}
+// calcEJ used by nothing here (phase model self-contained); buildingKeyOf for batching
+function dashBuildingKeyOf(d){ return normalizeBuilding(d.building) || extractBuilding(d.addr||'') || (d.addr||''); }
+ 
+const _SG_C02 = new Set(['성안원룸','왕산오피스텔','그린빌','로즈빌','애버빌','쉐르빌']);
+function dashRouteOf(building){
+  const b = normalizeBuilding(building);
+  if(_SG_C02.has(b)) return '410C02';
+  if(/^스위첸KCC/.test(b) || ['훕스테이','하우스블라썸','동일빌딩','동일하이빌'].includes(b)) return '410B01';
+  return '교내';
+}
+
+// 같은 건물 배송들을 1회 방문으로 합성 (접근·계단 1회, 운반은 전 박스 합산)
+function dashMerge(dels){
+  if(!dels.length) return null;
+  const pkgCount  = dels.reduce((s,d)=>s+(+d.pkgCount||1),0);
+  const totWeight = dels.reduce((s,d)=>s+(+d.pkgWeightKg||0)*(+d.pkgCount||1),0);
+  const floor     = Math.max(...dels.map(d=>+d.floor||1));
+  const hasElevator = dels.some(d=>!!d.hasElevator);
+  return { floor, hasElevator, pkgCount, pkgWeightKg: pkgCount>0 ? totWeight/pkgCount : 0 };
+}
+
+// 권장 경로(건물 1회 방문·배치) 총 에너지(kcal)
+function dayFollowKcal(dels, uw){
+  uw = uw || 66;
+  const byB = {};
+  dels.forEach(d=>{ const k=dashBuildingKeyOf(d); (byB[k]=byB[k]||[]).push(d); });
+  let J=0;
+  Object.values(byB).forEach(g=>{ J += buildingVisitEnergyJ(g, uw); });  // 그룹/엘베거점 모델
+  return J/4184;
+}
+
+// 경로 미준수(박스마다 개별 왕복) 총 에너지(kcal)
+function dayNoFollowKcal(dels, uw){
+  uw = uw || 66;
+  let J=0;
+  dels.forEach(d=>{
+    const n = +d.pkgCount||1;
+    const single = { floor:+d.floor||1, hasElevator:!!d.hasElevator, pkgCount:1, pkgWeightKg:+d.pkgWeightKg||1 };
+    J += n * calcPred(single, uw);   // 박스 1개씩 개별 왕복
+  });
+  return J/4184;
+}
+
+
+
+// ═══════════════════════════════════════════════════════════
+//  READ LIVE DATA FROM localStorage (synced from courier app)
+// ═══════════════════════════════════════════════════════════
+function readLiveSync() {
+  const result = { deliveryStatus: {}, calcSync: {}, footprint: [], appState: null };
+  try { result.deliveryStatus = JSON.parse(localStorage.getItem('heatmap_delivery_sync') || '{}'); } catch{}
+  try { result.calcSync       = JSON.parse(localStorage.getItem('heatmap_calc_sync') || '{}'); } catch{}
+  try { result.footprint      = JSON.parse(localStorage.getItem('energy_footprint') || '[]'); } catch{}
+  return result;
+}
+
+function getLiveCourierData() {
+  const live = readLiveSync();
+  const today = new Date().toISOString().split('T')[0];
+ 
+  const statuses = Object.values(live.deliveryStatus);
+  const syncedBoxes    = statuses.reduce((s, v) => s + (+v.count || 0), 0);
+  const completedBoxes = statuses.reduce((s, v) =>
+    s + (typeof v.done === 'number' ? v.done : (v.status === 'complete' ? (+v.count || 0) : 0)), 0);
+  const incomplete = statuses.filter(s => s.status === 'scan').length;
+  const totalPkgs = KIM_DELIVERIES.reduce((s, d) => s + d.count, 0);
+  const completed = completedBoxes;                                   
+  const progressTotal = syncedBoxes > 0 ? syncedBoxes : totalPkgs;     
+  const total = progressTotal;
+
+  // Energy from footprint
+  const fpEnergy = live.footprint.reduce((s, pt) => s + (pt.ej || 0), 0);
+
+  // Estimate WSI from footprint data
+  const bsa = 0.007184 * Math.pow(72, 0.425) * Math.pow(175, 0.725);
+  const shiftSec = live.footprint.length * 2; // 2s per point
+  const eLim = 165 * bsa * Math.max(shiftSec, 1);
+  const wsi = eLim > 0 ? fpEnergy / eLim : 0;
+
+  // Last MET from footprint
+  const lastMet = live.footprint.length > 0 ? live.footprint[live.footprint.length - 1].met : 0;
+  const lastActivity = lastMet > 7 ? '뛰기' : lastMet > 5 ? '계단 오르기' : lastMet > 3 ? '평지 걷기' : lastMet > 1.5 ? '대기/앉기' : '—';
+
+  return {
+    ...COURIERS['CP-10291'],
+    completed, total: total, totalPkgs, progressTotal,
+    incomplete,
+    fpEnergy: Math.round(fpEnergy),
+    fpKcal: (fpEnergy / 4184).toFixed(1),
+    wsi: +wsi.toFixed(3),
+    shiftMin: Math.round(shiftSec / 60),
+    lastMet: +lastMet.toFixed(2),
+    lastActivity,
+    temperature: 28.5,  // default — updated when weather syncs
+    humidity: 65,
+    footprintCount: live.footprint.length,
+    deliveryStatus: live.deliveryStatus,
+    date: today
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RISK CLASSIFICATION (matches app: NIOSH + WSI)
+// ═══════════════════════════════════════════════════════════
+function getRisk(wsi, temp) {
+  if (wsi >= 1.2 || temp >= 35) return { text:'위험', cls:'b-danger', alert:'red' };
+  if (wsi >= 1.0 || temp >= 33) return { text:'경고', cls:'b-warn',   alert:'amber' };
+  if (wsi >= 0.8 || temp >= 30) return { text:'주의', cls:'b-warn',   alert:'amber' };
+  return { text:'정상', cls:'b-ok', alert:'green' };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NAVIGATION
+// ═══════════════════════════════════════════════════════════
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const pg = document.getElementById('pg-' + id);
+  if (pg) pg.classList.add('active');
+  document.querySelectorAll('.sb-btn').forEach(b => b.classList.remove('on'));
+  event?.target?.classList?.add('on');
+
+  if (id === 'couriers') renderCourierProfiles();
+  if (id === 'alerts') renderAlertHistory();
+  if (id === 'records') loadRecords();
+  if (id === 'datasets') loadDatasets();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER: OVERVIEW
+// ═══════════════════════════════════════════════════════════
+function renderOverview() {
+  const kim = getLiveCourierData();
+ 
+  const banner = document.getElementById('data-source-banner');
+  if (banner) {
+    const real = DATA_SOURCE === 'server';
+    banner.style.display = 'block';
+    banner.style.background = real ? 'rgba(5,150,105,.10)' : 'rgba(217,119,6,.12)';
+    banner.style.color = real ? '#047857' : '#b45309';
+    banner.style.border = '1px solid ' + (real ? 'rgba(5,150,105,.35)' : 'rgba(217,119,6,.35)');
+    banner.innerHTML = real
+      ? `✅ 실데이터 — 서버 배송정보(/deliveries)를 Compendium 모델로 계산 · 실측은 근무기록(/records) 기준`
+      : `⚠️ 예시(데모) 수치 표시 중 — 설정에서 서버 URL을 입력하면 실데이터로 자동 전환됩니다`;
+  }
+  const risk = getRisk(kim.wsi, kim.temperature);
+
+  // ── 실제 수집 데이터 + 앱 저장 기록 병합 ──
+  const agg = aggregateRealStats();
+
+  // KPI bar — SB-Admin coloured cards (4 across)
+  renderKpiBar(agg);
+
+  // 실측 근무기록(/records) 기반 자동 인사이트
+  renderInsights(agg);
+
+  // Chart.js charts (Chart.js loaded from CDN in <head>)
+  renderEnergyTrend(agg);
+  renderRouteMixDonut(agg);
+  renderSavingsBars(agg);
+  renderWsiLine(agg);
+  renderBldgLoadBar(agg);
+
+  // Existing renderers we keep
+  renderDailyTable(agg);
+  renderMonthlyGrid(agg);
+
+  // Courier table  
+  const allCouriers = [{ ...kim, risk }];
+  document.getElementById('courier-tbody').innerHTML = allCouriers.map(c => `
+    <tr class="row-click" onclick="renderDetail('${c.id}')">
+      <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--t3)">${c.id}</td>
+      <td><strong>${c.name}</strong></td>
+      <td style="font-size:11px">${c.area || ''}</td>
+      <td>${c.completed}/${c.total || '-'}</td>
+      <td style="font-weight:700;color:${c.wsi>=1?'var(--red)':c.wsi>=0.8?'var(--amber)':'var(--green)'}">${c.wsi.toFixed(2)}</td>
+      <td><span class="badge ${c.risk.cls}">${c.risk.text}</span></td>
+    </tr>`).join('');
+
+  renderAlertsLive(kim, risk);
+  renderDetail('CP-10291');
+
+  // Time
+  document.getElementById('live-time').textContent = new Date().toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+ 
+let REAL_DAILY = null;      // 서버에서 계산된 일별 통계(로드 전 null)
+let DETAIL_BY_DATE = {};     // date -> { dels:[...], rec:{...} }  (배송정보 상세용)
+let REC_BY_DATE = {};        // date -> 최신 근무기록
+let DATA_SOURCE = 'demo';    // 'server' | 'demo'
+
+function mapBoxToDel(b){
+  return {
+    id: b.id || '', addr: b.addr || b.building || '', building: normalizeBuilding(b.building) || '',
+    floor: +b.floor || 1, hasElevator: !!b.hasElevator,
+    pkgCount: +b.pkgCount || 1, pkgWeightKg: +b.pkgWeightKg || 1,
+    routeNo: b.route_no || '', pkgType: b.pkg_type || '', trackingNo: b.tracking_no || ''
+  };
+}
+
+async function loadRealDailyStats(){
+  const srv = (localStorage.getItem('dashboard_srv_url') || '').replace(/\/$/,'');
+  if(!srv){ DATA_SOURCE='demo'; return false; }
+  const H = { 'ngrok-skip-browser-warning':'true' };
+  try {
+    const idxR = await fetch(srv+'/deliveries', { headers:H, signal:AbortSignal.timeout(8000) });
+    if(!idxR.ok) throw new Error('idx');
+    const datasets = ((await idxR.json())||{}).datasets || [];
+    if(!datasets.length){ DATA_SOURCE='demo'; return false; }
+    // measured records (per date + per-delivery 예측/실측)
+    let recs=[]; try { const rr=await fetch(srv+'/records',{headers:H,signal:AbortSignal.timeout(8000)}); if(rr.ok){ const d=await rr.json(); if(Array.isArray(d)) recs=d; } } catch(e){}
+    const recByDate={}; recs.forEach(r=>{ if(r&&r.date){ const ex=recByDate[r.date]; if(!ex || (r.savedAt||'')>(ex.savedAt||'')) recByDate[r.date]=r; } });
+    const w = courierBodyW();
+    const rows=[]; const detailByDate={};
+    for(const ds of datasets){
+      let boxes=[];
+      try {
+        const u = srv+`/deliveries?company=${encodeURIComponent(ds.company)}&date=${encodeURIComponent(ds.date)}`;
+        const r = await fetch(u,{headers:H,signal:AbortSignal.timeout(9000)});
+        if(r.ok) boxes = ((await r.json())||{}).boxes || [];
+      } catch(e){}
+      if(!boxes.length) continue;
+      const dels = boxes.map(mapBoxToDel);
+      const rec = recByDate[ds.date] || null;
+      const routes = {};
+      dels.forEach(d => { const rt = dashRouteOf(d.building); routes[rt] = (routes[rt]||0) + (+d.pkgCount||1); });
+      rows.push({
+        date: ds.date, company: ds.company, routes,
+        boxes: dels.reduce((s,d)=>s+(+d.pkgCount||1),0),
+        buildings: new Set(dels.map(d=>dashBuildingKeyOf(d))).size,
+        kcalFollow:   +dayFollowKcal(dels, w).toFixed(1),     // 예측: 권장(건물 1회 방문)
+        kcalNoFollow: +dayNoFollowKcal(dels, w).toFixed(1),   // 예측: 미준수(박스별 왕복)
+        measuredKcal: rec && +rec.totKc>0 ? +(+rec.totKc).toFixed(1) : 0,  // 실측(근무기록)
+        maxWsi:   rec ? +(+rec.maxWsi||0) : 0,
+        shiftMin: rec && rec.shiftSec ? Math.round(rec.shiftSec/60) : 0,
+        _real: true
+      });
+      detailByDate[ds.date] = { dels, rec };
+    }
+    if(!rows.length){ DATA_SOURCE='demo'; return false; }
+    rows.sort((a,b)=>a.date.localeCompare(b.date));
+    REAL_DAILY = rows; DETAIL_BY_DATE = detailByDate; REC_BY_DATE = recByDate; DATA_SOURCE='server';
+    return true;
+  } catch(e){ DATA_SOURCE='demo'; return false; }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  일별 집계 — 실데이터(REAL_DAILY) 우선, 미연결 시 DEMO 시드(DAILY_STATS)
+// ═══════════════════════════════════════════════════════════
+function aggregateRealStats() {
+  const usingReal = !!(REAL_DAILY && REAL_DAILY.length);
+  const rows = (usingReal ? REAL_DAILY : DAILY_STATS).map(d => ({...d}));
+  // 앱이 같은 브라우저에 저장한 기록(wl_log)으로 실측/WSI 보강 (예측값은 덮어쓰지 않음)
+  let appLog = [];
+  try { appLog = JSON.parse(localStorage.getItem('wl_log') || '[]'); } catch(e) {}
+  appLog.forEach(r => {
+    if (!r || !r.date) return;
+    const kcal = (typeof r.totKc === 'number' ? r.totKc : +r.totKc) || 0;
+    const ex = rows.find(x => x.date === r.date);
+    if (ex) {
+      if (kcal > 0) ex.measuredKcal = Math.max(ex.measuredKcal || 0, kcal);
+      if (r.maxWsi)  ex.maxWsi  = Math.max(ex.maxWsi || 0, +r.maxWsi);
+      if (r.shiftSec) ex.shiftMin = Math.round(r.shiftSec / 60);
+      if (!usingReal && kcal > 0) ex.kcalFollow = kcal;  // 데모 시드일 때만 실측으로 대체
+      ex._fromApp = true;
+    } else {
+      rows.push({ date:r.date, boxes:r.dels||0, buildings:0,
+        kcalFollow:0, kcalNoFollow:0, measuredKcal:kcal,
+        maxWsi:+r.maxWsi||0, shiftMin:Math.round((r.shiftSec||0)/60), _fromApp:true });
+    }
+  });
+  rows.sort((a,b) => (a.date || '').localeCompare(b.date || ''));
+
+  const totalBoxes    = rows.reduce((s,d) => s + (d.boxes || 0), 0);
+  const totalKcal     = rows.reduce((s,d) => s + (d.kcalFollow || 0), 0);
+  const totalNoFollow = rows.reduce((s,d) => s + (d.kcalNoFollow || 0), 0);
+  const totalMeasured = rows.reduce((s,d) => s + (d.measuredKcal || 0), 0);
+  const saveKcal   = totalNoFollow - totalKcal;
+  const savePct    = totalNoFollow > 0 ? (saveKcal / totalNoFollow * 100) : 0;
+  const maxWsi     = rows.reduce((m,d) => Math.max(m, d.maxWsi || 0), 0);
+  const totalMin   = rows.reduce((s,d) => s + (d.shiftMin || 0), 0);
+
+  return {
+    rows, days: rows.length, source: DATA_SOURCE, usingReal,
+    firstDate: (rows[0]?.date || '').replace(/-/g,'.'),
+    lastDate: (rows[rows.length-1]?.date || '').replace(/-/g,'.'),
+    totalBoxes, totalKcal, totalNoFollow, totalMeasured, saveKcal, savePct, maxWsi, totalMin
+  };
+}
+
+// ── 경로 준수 vs 미준수 비교 막대 ── 
+const CHARTS = {};
+
+function _destroyChart(key) {
+  if (CHARTS[key]) { try { CHARTS[key].destroy(); } catch(e){} CHARTS[key] = null; }
+}
+
+// Tasteful colour ramp (matches SB-Admin / Material defaults)
+const C = {
+  blue:'#2563eb', blueSoft:'rgba(37,99,235,.12)',
+  green:'#059669', greenSoft:'rgba(5,150,105,.12)',
+  red:'#dc2626',   redSoft:'rgba(220,38,38,.12)',
+  amber:'#d97706', amberSoft:'rgba(217,119,6,.12)',
+  purple:'#7c3aed',purpleSoft:'rgba(124,58,237,.12)',
+  slate:'#64748b'
+};
+
+function _shortDate(d) { return (d||'').slice(5).replace('-','/'); }
+
+// ── KPI bar (SB-Admin coloured cards) ──────────────────────
+function renderKpiBar(agg) {
+  const el = document.getElementById('kpi-bar');
+  if (!el) return;
+  const measured = agg.totalMeasured > 0;
+  const energySub = measured
+    ? `예측 ${agg.totalKcal.toFixed(0)} · 실측 ${agg.totalMeasured.toFixed(0)} kcal`
+    : `모델 예측 · 권장경로 기준 (실측 근무기록 없음)`;
+  const cards = [
+    { tag:'수집 박스', big: agg.totalBoxes.toLocaleString(), sub:`일 평균 ${Math.round(agg.totalBoxes/agg.days)}박스 (${agg.days}일)`, icon:'📦', color:'' },
+    { tag:'누적 에너지 (권장·예측)', big: agg.totalKcal.toFixed(0)+' kcal', sub: energySub, icon:'⚡', color:'green' },
+    { tag:'경로 절감 (모델 추정)', big: agg.savePct.toFixed(0)+'%', sub:`${agg.saveKcal.toFixed(0)} kcal · 권장 vs 미준수`, icon:'🛣', color:'amber' },
+    { tag:'최대 WSI (실측)', big: agg.maxWsi>0?agg.maxWsi.toFixed(2):'—', sub: agg.maxWsi>0 ? getRisk(agg.maxWsi,28).text + ' · ISO 8996' : '근무기록 없음', icon:'💪', color: agg.maxWsi>=1?'red':agg.maxWsi>=0.8?'amber':'green' },
+  ];
+  el.innerHTML = cards.map(k => `
+    <div class="kpi-card ${k.color}">
+      <div class="kpi-content">
+        <div class="kpi-tag">${k.tag}</div>
+        <div class="kpi-big">${k.big}</div>
+        <div class="kpi-sub">${k.sub}</div>
+      </div>
+      <div class="kpi-icon">${k.icon}</div>
+    </div>`).join('');
+}
+
+// ── 실측 근무기록(/records) 기반 자동 인사이트 ────────────── 
+function renderInsights(agg) {
+  const el = document.getElementById('insights-panel');
+  if (!el) return;
+ 
+  const measuredBoxes = [];           // {addr, building, predJ, actualJ, measured, date}
+  let totMeasuredJ = 0, totPredJ = 0, measuredCount = 0;
+  const recMap = {};
+  Object.values(REC_BY_DATE || {}).forEach(r => { if (r && r.date) recMap[r.date] = r; });
+  try {
+    const localLog = JSON.parse(localStorage.getItem('wl_log') || '[]');
+    localLog.forEach(r => {
+      if (!r || !r.date) return;
+      const ex = recMap[r.date];
+      if (!ex || (r.savedAt || '') > (ex.savedAt || '')) recMap[r.date] = r;
+    });
+  } catch (e) {}
+  const recs = Object.values(recMap);
+  recs.forEach(rec => {
+    (rec.deliveries || []).forEach(p => {
+      if (p.status !== 'done') return;
+      const aJ = +p.actualJ || 0, pJ = +p.predJ || 0;
+      if (aJ > 0) {
+        measuredBoxes.push({
+          addr: p.addr || '', building: extractBuilding(p.addr || ''),
+          predJ: pJ, actualJ: aJ, measured: !!p.measured, date: rec.date
+        });
+        totMeasuredJ += aJ; totPredJ += pJ;
+        if (p.measured) measuredCount++;
+      }
+    });
+  });
+
+  const hasMeasured = totMeasuredJ > 0;
+  if (!hasMeasured) {
+    // 실측 기록이 없으면: 예측만 있다는 점을 명확히 안내
+    el.style.display = 'block';
+    el.innerHTML = `
+      <div style="background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.3);border-radius:12px;padding:14px 16px">
+        <div style="font-size:13px;font-weight:800;color:#b45309;margin-bottom:4px">💡 실측 기반 인사이트</div>
+        <div style="font-size:12px;color:#92400e;line-height:1.6">
+          아직 저장된 <b>실측 근무기록</b>이 없습니다. 앱에서 배송을 모니터링·완료하면
+          (단일 또는 <b>그룹 측정</b>) 측정된 에너지가 여기 인사이트로 자동 생성됩니다.
+          현재 KPI·차트의 수치는 <b>Compendium 위상모델 예측값</b>입니다.
+        </div>
+      </div>`;
+    return;
+  }
+
+  // 2) 건물별 실측 집계
+  const byBldg = {};
+  measuredBoxes.forEach(b => {
+    const k = b.building || b.addr || '기타';
+    if (!byBldg[k]) byBldg[k] = { actualJ: 0, predJ: 0, n: 0 };
+    byBldg[k].actualJ += b.actualJ; byBldg[k].predJ += b.predJ; byBldg[k].n++;
+  });
+  const bldgRanked = Object.entries(byBldg)
+    .map(([k, v]) => ({ bldg: k, ...v }))
+    .sort((a, b) => b.actualJ - a.actualJ);
+  const topBldg = bldgRanked[0];
+
+  // 3) 예측 대비 실측 오차 (모델 보정 인사이트)
+  const errPct = totPredJ > 0 ? ((totMeasuredJ - totPredJ) / totPredJ) * 100 : 0;
+
+  // 4) 최고 WSI 일자 (실측 근무기록)
+  let maxWsiDay = null;
+  recs.forEach(r => { const w = +r.maxWsi || 0; if (!maxWsiDay || w > maxWsiDay.wsi) maxWsiDay = { date: r.date, wsi: w }; });
+
+  // 5) 그룹 측정 비율 (동시 배송 1회 방문 측정 활용도)
+  const groupShare = measuredBoxes.length ? (measuredCount / measuredBoxes.length) * 100 : 0;
+
+  const kcal = j => (j / 4184).toFixed(1);
+  const cards = [];
+
+  cards.push({
+    icon: '📏', color: '#0284c7',
+    title: '예측 모델 정확도 (실측 대비)',
+    body: `실측 누적 <b>${kcal(totMeasuredJ)} kcal</b> vs 예측 <b>${kcal(totPredJ)} kcal</b> · 오차 <b style="color:${Math.abs(errPct) > 20 ? '#dc2626' : '#059669'}">${errPct >= 0 ? '+' : ''}${errPct.toFixed(0)}%</b>` +
+      (errPct > 20 ? ' — 위상모델이 실측보다 높게 추정하는 경향. 부하·시간 파라미터 재보정 권장.' :
+       errPct < -20 ? ' — 모델이 실측보다 낮게 추정. 계단·하중 가중치 상향 검토.' :
+       ' — 예측과 실측이 잘 일치합니다.')
+  });
+
+  if (topBldg) {
+    cards.push({
+      icon: '🏢', color: '#dc2626',
+      title: '실측 에너지 부담 최다 건물',
+      body: `<b>${topBldg.bldg}</b> — 실측 <b>${kcal(topBldg.actualJ)} kcal</b> (${topBldg.n}건). ` +
+        (bldgRanked[1] ? `2위 ${bldgRanked[1].bldg} ${kcal(bldgRanked[1].actualJ)} kcal. ` : '') +
+        '고부하 건물은 그룹(1회 방문) 배송과 휴식 배치를 우선 적용하세요.'
+    });
+  }
+
+  if (maxWsiDay && maxWsiDay.wsi > 0) {
+    const r = getRisk(maxWsiDay.wsi, 28);
+    cards.push({
+      icon: '💪', color: maxWsiDay.wsi >= 1 ? '#dc2626' : maxWsiDay.wsi >= 0.8 ? '#d97706' : '#059669',
+      title: '최고 작업부하(WSI) 일자',
+      body: `${_shortDate(maxWsiDay.date)} · WSI <b>${maxWsiDay.wsi.toFixed(2)}</b> (${r.text}). ` +
+        (maxWsiDay.wsi >= 1 ? 'ISO 8996 권고 한도 초과 — 해당 일정 분산·휴식 강화 필요.' : '권고 범위 내 관리되고 있습니다.')
+    });
+  }
+
+  cards.push({
+    icon: '📦', color: '#7c3aed',
+    title: '그룹(동시) 측정 활용도',
+    body: `실측 ${measuredBoxes.length}건 중 <b>${groupShare.toFixed(0)}%</b>가 그룹 1회 방문 측정으로 기록됨. ` +
+      (groupShare < 30 ? '같은 건물 다중 선택 → 그룹 측정을 더 활용하면 중복 이동 제거 효과를 정확히 포착할 수 있습니다.'
+        : '동시 배송 측정이 잘 활용되고 있습니다.')
+  });
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="font-size:13px;font-weight:800;color:var(--t1);margin-bottom:10px;display:flex;align-items:center;gap:6px">
+      💡 실측 기반 인사이트 <span style="font-size:10px;font-weight:600;color:#047857;background:rgba(5,150,105,.12);padding:2px 8px;border-radius:10px">근무기록 ${measuredBoxes.length}건 · ${recs.length}일</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      ${cards.map(c => `
+        <div style="background:#fff;border:1px solid var(--border);border-left:4px solid ${c.color};border-radius:10px;padding:12px 14px">
+          <div style="font-size:12px;font-weight:800;color:var(--t1);margin-bottom:4px">${c.icon} ${c.title}</div>
+          <div style="font-size:11.5px;color:var(--t2);line-height:1.6">${c.body}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── Chart 1: line — daily kcal follow vs no-follow ─────────
+function renderEnergyTrend(agg) {
+  if (typeof Chart === 'undefined') return;
+  const el = document.getElementById('chart-energy-trend');
+  if (!el) return;
+  _destroyChart('trend');
+  const labels = agg.rows.map(r => _shortDate(r.date));
+  const follow = agg.rows.map(r => +(r.kcalFollow||0).toFixed(1));
+  const noF    = agg.rows.map(r => +(r.kcalNoFollow||0).toFixed(1));
+  const meas   = agg.rows.map(r => (r.measuredKcal||0) > 0 ? +(r.measuredKcal).toFixed(1) : null);
+  const hasMeas = meas.some(v => v != null);
+  const datasets = [
+    { label:'권장 경로 (예측·배치)', data:follow, borderColor:C.green, backgroundColor:C.greenSoft, tension:.35, fill:true, borderWidth:2, pointRadius:4, pointBackgroundColor:C.green },
+    { label:'미준수 (예측·개별 왕복)', data:noF, borderColor:C.red, backgroundColor:C.redSoft, tension:.35, fill:true, borderWidth:2, pointRadius:4, pointBackgroundColor:C.red, borderDash:[6,4] }
+  ];
+  if (hasMeas) datasets.push(
+    { label:'실측 (근무기록)', data:meas, borderColor:C.blue, backgroundColor:'transparent', tension:.35, fill:false, borderWidth:2.5, pointRadius:5, pointStyle:'rectRot', pointBackgroundColor:C.blue, spanGaps:true }
+  );
+  CHARTS.trend = new Chart(el.getContext('2d'), {
+    type:'line',
+    data:{labels, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      plugins:{
+        legend:{position:'bottom', labels:{boxWidth:14, font:{size:11}}},
+        tooltip:{callbacks:{ label:c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} kcal` }}
+      },
+      scales:{
+        y:{ beginAtZero:true, title:{display:true,text:'kcal',font:{size:11}}, grid:{color:'#f1f5f9'} },
+        x:{ grid:{display:false} }
+      }
+    }
+  });
+}
+
+// ── Chart 2: donut — boxes per route ──────────────────────
+function renderRouteMixDonut(agg) {
+  if (typeof Chart === 'undefined') return;
+  const el = document.getElementById('chart-route-mix');
+  if (!el) return;
+  _destroyChart('mix');
+  // Sum boxes per route across all days
+  const tot = {};
+  agg.rows.forEach(r => {
+    const routes = r.routes || { '교내': r.boxes||0 };
+    for (const [k,v] of Object.entries(routes)) tot[k] = (tot[k]||0) + (v||0);
+  });
+  const labels = Object.keys(tot);
+  const data = Object.values(tot);
+  const palette = [C.blue, C.amber, C.purple, C.green, C.red, C.slate];
+  CHARTS.mix = new Chart(el.getContext('2d'), {
+    type:'doughnut',
+    data:{labels, datasets:[{ data, backgroundColor: labels.map((_,i)=>palette[i%palette.length]), borderWidth:2, borderColor:'#fff' }]},
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout:'62%',
+      plugins:{
+        legend:{position:'bottom', labels:{boxWidth:12, font:{size:11}}},
+        tooltip:{callbacks:{ label:c => `${c.label}: ${c.parsed} 박스 (${((c.parsed/data.reduce((a,b)=>a+b,0))*100).toFixed(1)}%)` }}
+      }
+    }
+  });
+}
+
+// ── Chart 3: bar — daily savings (noFollow - follow) ───────
+function renderSavingsBars(agg) {
+  if (typeof Chart === 'undefined') return;
+  const el = document.getElementById('chart-savings');
+  if (!el) return;
+  _destroyChart('savings');
+  const labels = agg.rows.map(r => _shortDate(r.date));
+  const saved = agg.rows.map(r => +((r.kcalNoFollow||0) - (r.kcalFollow||0)).toFixed(1));
+  CHARTS.savings = new Chart(el.getContext('2d'), {
+    type:'bar',
+    data:{labels, datasets:[{ label:'경로 준수 시 절감 (kcal)', data:saved, backgroundColor:C.green, borderRadius:6, borderSkipped:false, barThickness:42 }]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{ label:c => `절감 ${c.parsed.y.toFixed(1)} kcal` }}
+      },
+      scales:{
+        y:{ beginAtZero:true, title:{display:true,text:'절감 kcal',font:{size:11}}, grid:{color:'#f1f5f9'} },
+        x:{ grid:{display:false} }
+      }
+    }
+  });
+}
+
+// ── Chart 4: line — daily max WSI with band thresholds ─────
+function renderWsiLine(agg) {
+  if (typeof Chart === 'undefined') return;
+  const el = document.getElementById('chart-wsi');
+  if (!el) return;
+  _destroyChart('wsi');
+  const labels = agg.rows.map(r => _shortDate(r.date));
+  const data = agg.rows.map(r => +(r.maxWsi||0).toFixed(2));
+  CHARTS.wsi = new Chart(el.getContext('2d'), {
+    type:'line',
+    data:{labels, datasets:[
+      { label:'최대 WSI', data, borderColor:C.purple, backgroundColor:C.purpleSoft, tension:.3, fill:true, borderWidth:2.5, pointRadius:5,
+        pointBackgroundColor: data.map(v => v>=1.2?C.red : v>=1.0?C.amber : v>=0.8?C.amber : C.green) },
+      { label:'주의 0.8', data: labels.map(()=>0.8), borderColor:C.amber, borderDash:[4,4], pointRadius:0, fill:false, borderWidth:1 },
+      { label:'경고 1.0', data: labels.map(()=>1.0), borderColor:C.red, borderDash:[4,4], pointRadius:0, fill:false, borderWidth:1 },
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'bottom', labels:{boxWidth:12, font:{size:11}, filter:i=>i.text.length<10}},
+      },
+      scales:{
+        y:{ beginAtZero:true, suggestedMax:1.3, title:{display:true,text:'WSI',font:{size:11}}, grid:{color:'#f1f5f9'} },
+        x:{ grid:{display:false} }
+      }
+    }
+  });
+}
+
+// ── Chart 5: horizontal bar — top buildings by load ─────────
+function renderBldgLoadBar(agg) {
+  if (typeof Chart === 'undefined') return;
+  const el = document.getElementById('chart-bldg-load');
+  if (!el) return;
+  _destroyChart('bldg'); 
+  const w = courierBodyW();
+  const perB = {};
+  let usedReal = false;
+  if (REAL_DAILY && Object.keys(DETAIL_BY_DATE).length) {
+    usedReal = true;
+    // 날짜별 dels를 건물 단위로 묶어 calcPred 합산
+    Object.values(DETAIL_BY_DATE).forEach(({dels}) => {
+      const byB = {};
+      (dels||[]).forEach(d => { const k = dashBuildingKeyOf(d); (byB[k]=byB[k]||[]).push(d); });
+      Object.entries(byB).forEach(([k,g]) => { perB[k] = (perB[k]||0) + buildingVisitEnergyJ(g, w)/4184; });
+    });
+  } else {
+    KIM_DELIVERIES.forEach(d => {
+      const tok = normalizeBuilding((d.dest||'').split(/[ _,]/)[0]) || '기타';
+      const single = { floor:d.floor||1, hasElevator:!!d.elevator, pkgCount:d.count||1, pkgWeightKg:d.weightKg||1 };
+      perB[tok] = (perB[tok]||0) + calcPred(single, w)/4184;
+    });
+  }
+  const sorted = Object.entries(perB).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const labels = sorted.map(([k])=>k);
+  const data = sorted.map(([_,v])=>+v.toFixed(1));
+  CHARTS.bldg = new Chart(el.getContext('2d'), {
+    type:'bar',
+    data:{labels, datasets:[{ label: usedReal ? '누적 부담 (kcal · 실데이터·모델)' : '부담 (kcal · 데모)', data, backgroundColor:C.blue, borderRadius:5, barThickness:18 }]},
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{ label:c => `${c.label}: ${c.parsed.x.toFixed(1)} kcal` }}
+      },
+      scales:{
+        x:{ beginAtZero:true, title:{display:true,text:'kcal',font:{size:11}}, grid:{color:'#f1f5f9'} },
+        y:{ grid:{display:false} }
+      }
+    }
+  });
+}
+
+// ── 일별 배송량 & 작업부하 테이블 ──
+function renderDailyTable(agg) {
+  const el = document.getElementById('daily-table');
+  if (!el) return;
+  el.innerHTML = `<table>
+    <thead><tr><th>날짜</th><th>박스</th><th>권장(예측)</th><th>미준수(예측)</th><th>실측</th><th>WSI</th><th>근무</th></tr></thead>
+    <tbody>${agg.rows.map(d => {
+      const wsi = d.maxWsi || 0;
+      const wc = wsi>=1?'var(--red)':wsi>=0.8?'var(--amber)':'var(--green)';
+      const hh = Math.floor((d.shiftMin||0)/60), mm = (d.shiftMin||0)%60;
+      const meas = (d.measuredKcal||0) > 0 ? (d.measuredKcal).toFixed(0) : '—';
+      return `<tr>
+        <td style="font-size:11px">${(d.date||'').replace(/-/g,'.')}${d._fromApp?' <span class="badge b-info" style="font-size:9px">앱</span>':''}</td>
+        <td>${d.boxes||0}</td>
+        <td style="font-weight:700;color:var(--green)">${(d.kcalFollow||0).toFixed(0)}</td>
+        <td style="color:var(--red)">${(d.kcalNoFollow||0).toFixed(0)}</td>
+        <td style="font-weight:700;color:var(--blue)">${meas}</td>
+        <td style="font-weight:700;color:${wc}">${wsi>0?wsi.toFixed(2):'—'}</td>
+        <td style="font-size:11px;color:var(--t3)">${(d.shiftMin||0)>0?((hh?hh+'시간 ':'')+mm+'분'):'—'}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+// ── 월간 누적 통계 그리드 ──
+function renderMonthlyGrid(agg) {
+  const el = document.getElementById('monthly-grid');
+  if (!el) return;
+  const avgBoxes = Math.round(agg.totalBoxes / agg.days);
+  const hh = Math.floor(agg.totalMin/60), mm = agg.totalMin%60;
+  el.innerHTML = [
+    { label:'누적 배송 박스', val: agg.totalBoxes.toLocaleString() + '박스' },
+    { label:'권장경로 에너지 (예측·모델)', val: agg.totalKcal.toFixed(0) + ' kcal' },
+    { label:'경로 미준수 시 (예측·모델)', val: agg.totalNoFollow.toFixed(0) + ' kcal' },
+    { label:'경로 준수 절감량 (모델 추정)', val: agg.saveKcal.toFixed(0) + ' kcal (' + agg.savePct.toFixed(0) + '%)' },
+    { label:'실측 소비 에너지 (근무기록)', val: agg.totalMeasured>0 ? agg.totalMeasured.toFixed(0)+' kcal' : '— (기록 없음)' },
+    { label:'일 평균 배송량', val: avgBoxes + '박스/일' },
+    { label:'누적 근무시간', val: agg.totalMin>0 ? ((hh?hh+'시간 ':'') + mm + '분') : '— ' },
+    { label:'최대 작업부하 WSI (실측)', val: agg.maxWsi>0?agg.maxWsi.toFixed(2):'—' },
+  ].map(k => `<div class="d-cell"><div class="d-cell-label">${k.label}</div><div class="d-cell-val">${k.val}</div></div>`).join('');
+}
+
+function renderAlertsLive(kim, risk) {
+  const el = document.getElementById('alerts-list');
+  const alerts = [];
+
+  if (kim.wsi >= 1.2) alerts.push({ cls:'alert-red', msg:`🚨 ${kim.name} WSI ${kim.wsi.toFixed(2)} — 즉시 휴식 필요 (ISO 8996 E_limit 초과)` });
+  else if (kim.wsi >= 1.0) alerts.push({ cls:'alert-amber', msg:`⚠️ ${kim.name} WSI ${kim.wsi.toFixed(2)} — 경고 수준 접근 중` });
+  if (kim.shiftMin >= 90) alerts.push({ cls:'alert-amber', msg:`⏱️ ${kim.name} 연속 근무 ${kim.shiftMin}분 — Åstrand(1986) 90분 임계값 초과` });
+  if (kim.incomplete > 0) alerts.push({ cls:'alert-amber', msg:`📭 미배송 ${kim.incomplete}건 — 회수대기` });
+  if (!alerts.length) alerts.push({ cls:'alert-green', msg:'✅ 현재 고위험 상태 기사 없음' });
+
+  el.innerHTML = alerts.map(a => `<div class="${a.cls} alert-card">${a.msg}</div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER: DETAIL PANEL
+// ═══════════════════════════════════════════════════════════
+// ── 배송정보 상세(예측/실측) — 날짜별 동적 구성 ──────────────
+let selectedDetailDate = null;
+function detailDatesAvailable(){
+  const ds = (REAL_DAILY && REAL_DAILY.length) ? REAL_DAILY.map(r=>r.date) : [];
+  return ds.length ? ds : ['2026-06-02'];
+}
+function _latestDetailDate(){
+  const ds = detailDatesAvailable();
+  return ds[ds.length-1];
+}
+// 선택 날짜의 배송 리스트 행: 근무기록(실측 predJ/actualJ) 우선 → 서버 계획(예측) → 데모
+function buildDetailRows(date){
+  const w = courierBodyW();
+  const entry = DETAIL_BY_DATE[date] || {};
+  const dels = entry.dels || [];
+  const rec  = entry.rec || REC_BY_DATE[date] || null;
+  // addr -> del (무게/수량/운송장 보강용)
+  const byAddr = {}; dels.forEach(d => { if(!(d.addr in byAddr)) byAddr[d.addr] = d; });
+
+  if (rec && Array.isArray(rec.deliveries) && rec.deliveries.length) {
+    // 실측 근무기록 — 예측(predJ) + 실측(actualJ) 모두 실데이터
+    return { source:'record', rows: rec.deliveries.map(p => {
+      const d = byAddr[p.addr] || {};
+      return { tracking:d.trackingNo||'', dest:p.addr||d.addr||'—', floor:p.floor||d.floor||1,
+               elevator:!!d.hasElevator, weight:d.pkgWeightKg||0, count:d.pkgCount||1,
+               pred:+p.predJ||0, actual:(p.actualJ!=null?+p.actualJ:null), status:p.status||'pending',
+               building: normalizeBuilding(d.building) || dashRouteOf(p.addr||'') };
+    })};
+  }
+  if (dels.length) {
+    // 서버 계획 데이터 — 예측은 모델로 계산, 실측은 아직 없음
+    return { source:'plan', rows: dels.map(d => ({
+      tracking:d.trackingNo||'', dest:d.addr||d.building||'—', floor:d.floor||1, elevator:!!d.hasElevator,
+      weight:d.pkgWeightKg||0, count:d.pkgCount||1,
+      pred: calcPred({floor:d.floor||1,hasElevator:!!d.hasElevator,pkgCount:d.pkgCount||1,pkgWeightKg:d.pkgWeightKg||1}, w),
+      actual:null, status:'pending', building: normalizeBuilding(d.building)
+    }))};
+  }
+  // 데모 폴백
+  return { source:'demo', rows: KIM_DELIVERIES.map(d => ({
+    tracking:d.trackingId||'', dest:d.dest||'—', floor:d.floor||1, elevator:!!d.elevator,
+    weight:d.weightKg||0, count:d.count||1,
+    pred: calcPred({floor:d.floor||1,hasElevator:!!d.elevator,pkgCount:d.count||1,pkgWeightKg:d.weightKg||1}, w),
+    actual:null, status:'pending', building:(d.dest||'').split(/[ _,]/)[0]
+  }))};
+}
+function selectDetailDate(d){ selectedDetailDate = d; renderDetail('CP-10291'); }
+
+function renderDetail(courierId) {
+  const panel = document.getElementById('detail-panel');
+  const profile = COURIERS[courierId];
+  if (!profile) { panel.innerHTML = '<p style="color:var(--t3)">기사 정보 없음</p>'; return; }
+
+  const kim = courierId === 'CP-10291' ? getLiveCourierData() : { wsi:0, fpEnergy:0, fpKcal:'0', shiftMin:0, lastActivity:'—', lastMet:0, completed:0, temperature:28, humidity:65 };
+  const risk = getRisk(kim.wsi, kim.temperature);
+  const live = readLiveSync();
+
+  // Determine package statuses from sync data
+  const _date = (courierId === 'CP-10291') ? (selectedDetailDate || _latestDetailDate()) : null;
+  const _built = (courierId === 'CP-10291') ? buildDetailRows(_date) : { source:'none', rows:[] };
+  const pkgs = _built.rows;
+  const _dates = detailDatesAvailable();
+  const _srcLabel = _built.source==='record' ? '실측 근무기록 (예측+실측)'
+                  : _built.source==='plan'   ? '서버 배송정보 · 모델 예측'
+                  : _built.source==='demo'   ? '데모 데이터'
+                  : '';
+  const _predSum = pkgs.reduce((s,p)=>s+(p.pred||0),0);
+  const _actSum  = pkgs.reduce((s,p)=>s+(p.actual||0),0);
+  const _hasAct  = pkgs.some(p=>p.actual!=null);
+  const _boxes   = pkgs.reduce((s,p)=>s+(p.count||1),0);
+  const _dateSel = (courierId === 'CP-10291') ? `
+      <select onchange="selectDetailDate(this.value)" style="margin-left:8px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit">
+        ${_dates.map(d=>`<option value="${d}" ${d===_date?'selected':''}>${d.replace(/-/g,'.')}</option>`).join('')}
+      </select>` : '';
+
+  panel.innerHTML = `
+    <div class="profile">
+      <div class="avatar">${profile.avatar}</div>
+      <div class="profile-info">
+        <div class="profile-name">${profile.name} <span class="badge ${risk.cls}" style="margin-left:6px">${risk.text}</span></div>
+        <div class="profile-sub">${profile.id} · ${profile.area} · ${profile.vehicle}</div>
+      </div>
+    </div>
+
+    <div class="d-grid">
+      <div class="d-cell"><div class="d-cell-label">체중 / 신장</div><div class="d-cell-val">${profile.weight}kg / ${profile.height}cm</div></div>
+      <div class="d-cell"><div class="d-cell-label">나이 / 성별</div><div class="d-cell-val">${profile.age}세 / ${profile.gender==='male'?'남':'여'}</div></div>
+      <div class="d-cell"><div class="d-cell-label">BMR (Harris-Benedict)</div><div class="d-cell-val">${profile.bmr} kcal/day</div></div>
+      <div class="d-cell"><div class="d-cell-label">BSA (DuBois 1916)</div><div class="d-cell-val">${(0.007184*Math.pow(profile.weight,0.425)*Math.pow(profile.height,0.725)).toFixed(4)} m²</div></div>
+      <div class="d-cell"><div class="d-cell-label">WSI (ISO 8996) · 실측</div><div class="d-cell-val" style="color:${kim.wsi>=1?'var(--red)':kim.wsi>=0.8?'var(--amber)':'var(--green)'}">${kim.wsi.toFixed(3)}</div></div>
+      <div class="d-cell"><div class="d-cell-label">실측 누적 에너지</div><div class="d-cell-val">${kim.fpKcal} kcal (${kim.fpEnergy.toLocaleString()} J)</div></div>
+      <div class="d-cell"><div class="d-cell-label">근무 시간 · 실측</div><div class="d-cell-val">${kim.shiftMin}분</div></div>
+      <div class="d-cell"><div class="d-cell-label">현재 활동 (MET)</div><div class="d-cell-val">${kim.lastActivity} (${kim.lastMet})</div></div>
+      <div class="d-cell"><div class="d-cell-label">배송 진행 (박스)</div><div class="d-cell-val">${kim.completed} / ${kim.progressTotal} (${kim.progressTotal > 0 ? Math.round(kim.completed/kim.progressTotal*100) : 0}%)</div></div>
+      <div class="d-cell"><div class="d-cell-label">입사일</div><div class="d-cell-val">${profile.startDate}</div></div>
+    </div>
+
+    <h3 style="margin-top:16px">📦 배송정보 ${_dateSel} <span style="font-size:11px;color:var(--t3);font-weight:500">· ${pkgs.length}건 · ${_boxes}박스 · ${_srcLabel}</span></h3>
+    <div style="font-size:11px;color:var(--t3);margin:4px 0 8px">
+      예측 합계 <b style="color:var(--green)">${(_predSum/4184).toFixed(1)} kcal</b> (${Math.round(_predSum).toLocaleString()} J)
+      ${_hasAct ? ` · 실측 합계 <b style="color:var(--blue)">${(_actSum/4184).toFixed(1)} kcal</b> (${Math.round(_actSum).toLocaleString()} J) · 오차 ${_predSum>0?(((_actSum-_predSum)/_predSum)*100).toFixed(0):'—'}%` : ' · 실측: 근무 완료 후 표시'}
+    </div>
+    <table style="margin-top:4px">
+      <thead><tr><th>운송장</th><th>배송지</th><th>층</th><th>무게×수량</th><th>예측(J)</th><th>실측(J)</th><th>상태</th></tr></thead>
+      <tbody>${pkgs.map(p => {
+        const bldg = p.building || Object.keys(live.deliveryStatus).find(k => (p.dest||'').includes(k));
+        const st = bldg ? live.deliveryStatus[bldg] : null;
+        const done = p.status==='done' || st?.status === 'complete';
+        const statusLabel = done ? '<span class="badge b-ok">완료</span>'
+                          : st?.status === 'scan' ? '<span class="badge b-warn">미배송</span>'
+                          : '<span class="badge b-info">대기</span>';
+        return `<tr>
+          <td style="font-family:'DM Mono',monospace;font-size:10px">${p.tracking||'—'}</td>
+          <td>${p.dest}</td>
+          <td>${p.floor}F${p.elevator?' 🛗':''}</td>
+          <td>${p.weight?p.weight+'kg':'—'}×${p.count}</td>
+          <td style="color:var(--green);font-weight:600">${Math.round(p.pred||0).toLocaleString()}</td>
+          <td style="color:var(--blue);font-weight:600">${p.actual!=null?Math.round(p.actual).toLocaleString():'—'}</td>
+          <td>${statusLabel}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+    <div style="margin-top:12px;font-size:10px;color:var(--t3)">📌 ${profile.note} · 예측 = Compendium 2011 위상모델(${profile.weight}kg) · 실측 = 앱 IMU 근무기록</div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER: COURIER PROFILES
+// ═══════════════════════════════════════════════════════════
+function renderCourierProfiles() {
+  const el = document.getElementById('courier-profiles');
+  el.innerHTML = Object.values(COURIERS).map(c => {
+    const bsa = (0.007184*Math.pow(c.weight,0.425)*Math.pow(c.height,0.725)).toFixed(4);
+    const isKim = c.id === 'CP-10291';
+    const kim = isKim ? getLiveCourierData() : null;
+    return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="profile">
+        <div class="avatar" style="background:${isKim?'var(--blue)':'var(--t3)'}">${c.avatar}</div>
+        <div class="profile-info">
+          <div class="profile-name">${c.name} ${isKim?'<span class="badge b-info">주 배송기사</span>':''}</div>
+          <div class="profile-sub">${c.id} · ${c.area} · ${c.vehicle}</div>
+        </div>
+      </div>
+      <div class="d-grid">
+        <div class="d-cell"><div class="d-cell-label">체중</div><div class="d-cell-val">${c.weight} kg</div></div>
+        <div class="d-cell"><div class="d-cell-label">신장</div><div class="d-cell-val">${c.height} cm</div></div>
+        <div class="d-cell"><div class="d-cell-label">나이</div><div class="d-cell-val">${c.age}세</div></div>
+        <div class="d-cell"><div class="d-cell-label">성별</div><div class="d-cell-val">${c.gender==='male'?'남성':'여성'}</div></div>
+        <div class="d-cell"><div class="d-cell-label">BMR (Roza & Shizgal 1984)</div><div class="d-cell-val">${c.bmr} kcal/day</div></div>
+        <div class="d-cell"><div class="d-cell-label">BSA (DuBois 1916)</div><div class="d-cell-val">${bsa} m²</div></div>
+        <div class="d-cell"><div class="d-cell-label">E_limit/hr (ISO 8996)</div><div class="d-cell-val">${Math.round(165 * bsa * 3600)} J</div></div>
+        <div class="d-cell"><div class="d-cell-label">입사일</div><div class="d-cell-val">${c.startDate}</div></div>
+      </div>
+      ${isKim && kim ? `<div style="margin-top:8px;padding:10px;background:#eff6ff;border-radius:8px;font-size:11px;color:var(--blue)">
+        📡 실시간: WSI ${kim.wsi.toFixed(3)} · ${kim.fpKcal} kcal · ${kim.shiftMin}분 근무 · ${kim.completed}/${kim.progressTotal} 박스 완료 · GPS 포인트 ${kim.footprintCount}
+      </div>` : '<div style="font-size:10px;color:var(--t3);margin-top:6px">⏸️ 현재 비활성 — 배송 데이터 없음</div>'}
+      <div style="margin-top:6px;font-size:10px;color:var(--t3)">📌 ${c.note}</div>
+    </div>`;
+  }).join('');
+}
+ 
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER: ALERT HISTORY
+// ═══════════════════════════════════════════════════════════
+function renderAlertHistory() {
+  const el = document.getElementById('alert-history');
+  if (!el) return;
+  // Show what we have immediately (from localStorage cache), then refresh from server.
+  _renderAlertsFrom(_mergedAlerts());
+  _fetchServerAlerts().then(() => _renderAlertsFrom(_mergedAlerts()));
+}
+
+// Merge localStorage + last-fetched server alerts, dedup by ts+msg, newest first.
+let _serverAlerts = [];
+function _mergedAlerts() {
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem('risk_alerts') || '[]'); } catch(e) {}
+  const seen = new Set();
+  const out = [];
+  // Server first (more authoritative timestamps)
+  [..._serverAlerts, ...local].forEach(a => {
+    const key = (a.ts||'') + '|' + (a.msg||'');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(a);
+  });
+  out.sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
+  return out;
+}
+
+async function _fetchServerAlerts() {
+  const srv = localStorage.getItem('dashboard_srv_url') || '';
+  if (!srv) return;
+  try {
+    const r = await fetch(srv + '/alerts?limit=200', {
+      headers: {'ngrok-skip-browser-warning':'true'},
+      signal: AbortSignal.timeout(6000)
+    });
+    if (r.ok) {
+      const arr = await r.json();
+      if (Array.isArray(arr)) _serverAlerts = arr;
+    }
+  } catch(e) {}
+}
+
+function _renderAlertsFrom(alerts) {
+  const el = document.getElementById('alert-history');
+  if (!el) return;
+  const kim = getLiveCourierData();
+
+  // Current state summary card on top
+  const liveCards = [];
+  if (kim.wsi >= 1.2) liveCards.push({ level:'위험', msg:`WSI ${kim.wsi.toFixed(2)} ≥ 1.2 — ISO 8996 E_limit 초과. 즉시 휴식 필요.`, cls:'alert-red' });
+  else if (kim.wsi >= 0.8) liveCards.push({ level:'주의', msg:`WSI ${kim.wsi.toFixed(2)} — 경고 수준 접근 중.`, cls:'alert-amber' });
+  if (kim.shiftMin >= 120) liveCards.push({ level:'경고', msg:`연속근무 ${kim.shiftMin}분 — Åstrand(1986) 120분 초과.`, cls:'alert-red' });
+  else if (kim.shiftMin >= 90) liveCards.push({ level:'주의', msg:`연속근무 ${kim.shiftMin}분 — 90분 임계값 도달.`, cls:'alert-amber' });
+  if (!liveCards.length) liveCards.push({ level:'정상', msg:'현재 고위험 상태 없음.', cls:'alert-green' });
+
+  const lvlCls = lvl =>
+    lvl === '위험' ? 'alert-red'   :
+    lvl === '경고' ? 'alert-red'   :
+    lvl === '주의' ? 'alert-amber' : 'alert-green';
+
+  const fmt = ts => {
+    try { return new Date(ts).toLocaleString('ko-KR', { hour12: false }); }
+    catch(e) { return ts || '—'; }
+  };
+
+  const historyHtml = alerts.length
+    ? alerts.map(a => `
+        <div class="${lvlCls(a.level)} alert-card" style="margin-bottom:6px;display:flex;gap:10px;align-items:flex-start">
+          <span style="font-size:10px;color:var(--t3);min-width:130px">${fmt(a.ts)}</span>
+          <span style="font-weight:700;min-width:42px">${a.level||''}</span>
+          <span style="flex:1">${a.msg||''}</span>
+          ${a.worker ? `<span style="font-size:10px;color:var(--t3)">${a.worker}${a.company?' · '+a.company:''}</span>` : ''}
+        </div>`).join('')
+    : '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12px">알림 이력 없음 — 앱에서 WSI 임계값을 넘으면 여기에 기록됩니다.</div>';
+
+  el.innerHTML = `
+    <div class="card">
+      <h3>🚨 현재 알림 상태 (실시간)</h3>
+      <p style="font-size:11px;color:var(--t3);margin-bottom:8px">${new Date().toLocaleString('ko-KR')} · ${kim.name||'—'} · 5초마다 자동 갱신</p>
+      ${liveCards.map(h => `<div class="${h.cls} alert-card" style="margin-bottom:6px"><b style="margin-right:8px">${h.level}</b>${h.msg}</div>`).join('')}
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>📜 알림 이력 (${alerts.length}건)</h3>
+      ${historyHtml}
+    </div>`;
+}
+
+// Auto-refresh while the user is on the alerts tab
+setInterval(() => {
+  const pg = document.getElementById('pg-alerts');
+  if (pg && pg.classList.contains('active')) renderAlertHistory();
+}, 5000);
+
+// ═══════════════════════════════════════════════════════════
+//  SETTINGS
+// ═══════════════════════════════════════════════════════════
+function saveSrvUrl() {
+  const url = document.getElementById('set-srv').value.trim().replace(/\/$/, '');
+  if (!url) return;
+  localStorage.setItem('dashboard_srv_url', url);
+  document.getElementById('set-status').textContent = '⏳ 저장됨 · 실데이터 로드 중… ' + url;
+  loadRealDailyStats().then(ok => {
+    document.getElementById('set-status').textContent =
+      (ok ? '✅ 저장 + 실데이터 로드됨: ' : '✅ 저장됨 (실데이터 없음 — 서버/적재 확인): ') + url;
+    renderOverview();
+  });
+}
+
+function clearAllSync() {
+  if (!confirm('모든 동기화 데이터를 삭제하시겠습니까?')) return;
+  ['energy_footprint','heatmap_delivery_sync','heatmap_calc_sync'].forEach(k => localStorage.removeItem(k));
+  alert('✅ 초기화 완료');
+  renderOverview();
+}
+
+function exportData() {
+  const data = {
+    couriers: COURIERS,
+    deliveries: KIM_DELIVERIES,
+    liveSync: readLiveSync(),
+    exportedAt: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `kwalo_jero_export_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DAILY RECORDS 
+let RECORDS = [];
+
+async function loadRecords() {
+  let serverRecs = [];
+  const srv = localStorage.getItem('dashboard_srv_url') || '';
+  if (srv) {
+    try {
+      const r = await fetch(srv + '/records', { headers:{ 'ngrok-skip-browser-warning':'true' }, signal: AbortSignal.timeout(6000) });
+      if (r.ok) { const d = await r.json(); if (Array.isArray(d)) serverRecs = d; }
+    } catch(e) {}
+  }
+  let localRecs = [];
+  try { localRecs = JSON.parse(localStorage.getItem('wl_log') || '[]'); } catch(e) {}
+
+  // Merge by date + worker (server wins on conflict)
+  const map = {};
+  [...localRecs, ...serverRecs].forEach(r => {
+    if (!r || !r.date) return;
+    map[r.date + '__' + (r.worker_id || r.worker || '')] = r;
+  });
+  RECORDS = Object.values(map).sort((a,b) => (b.date || '').localeCompare(a.date || ''));
+  renderRecordList();
+}
+
+function renderRecordList() {
+  const el = document.getElementById('rec-date-list');
+  if (!el) return;
+  if (!RECORDS.length) {
+    el.innerHTML = '<p style="color:var(--t3);font-size:12px">저장된 기록이 없습니다.<br>배송기사 앱의 <b>기록 탭 → 업무 기록 저장</b>을 누르면 여기에 표시됩니다.</p>';
+    document.getElementById('rec-detail').innerHTML = '<h3>📋 상세</h3><p style="color:var(--t3);font-size:12px">기록이 없습니다.</p>';
+    return;
+  }
+  el.innerHTML = RECORDS.map((r, i) => {
+    const wsi = +(r.maxWsi || 0);
+    const badge = wsi >= 1.2 ? '<span class="badge b-danger">위험</span>'
+                : wsi >= 1.0 ? '<span class="badge b-warn">경고</span>'
+                : wsi >= 0.8 ? '<span class="badge b-warn">주의</span>'
+                : '<span class="badge b-ok">정상</span>';
+    const kc = (typeof r.totKc === 'number' ? r.totKc : +r.totKc || 0).toFixed(1);
+    return `<div class="row-click" style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px" onclick="showRecord(${i})">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-weight:800;font-size:14px">${(r.date || '').replace(/-/g,'.')}</div>
+          <div style="font-size:11px;color:var(--t3)">${r.worker || '—'}${r.camp ? ' · ' + r.camp : ''}</div>
+        </div>${badge}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:11px;color:var(--t2)">
+        <span>완료 ${r.dels || 0}건</span><span>${kc} kcal</span><span>WSI ${wsi.toFixed(2)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showRecord(i) {
+  const r = RECORDS[i]; if (!r) return;
+  const ss = r.shiftSec || 0;
+  const dur = ss >= 3600 ? `${Math.floor(ss/3600)}시간 ${Math.floor((ss%3600)/60)}분` : `${Math.floor(ss/60)}분`;
+  const wsi = +(r.maxWsi || 0);
+  const dels = r.deliveries || [];
+  const wsiColor = wsi >= 1 ? 'var(--red)' : wsi >= 0.8 ? 'var(--amber)' : 'var(--green)';
+  // Manual calc (heatmap "오늘 실측 계산" input snapshot)
+  const mc = r.manualCalc || {};
+  const mcEntries = Object.entries(mc);
+  const mcTotal = mcEntries.reduce((s, [, v]) => s + (v.kcal || 0), 0);
+  const mcSection = mcEntries.length ? `
+    <h3 style="margin-top:14px">🧮 히트맵 실측 계산 (${mcEntries.length}건 · 총 ${mcTotal.toFixed(1)} kcal)</h3>
+    <table style="margin-top:8px">
+      <thead><tr><th>건물</th><th>총 박스</th><th>층별</th><th>kcal</th></tr></thead>
+      <tbody>${mcEntries.map(([bldg, v]) => {
+        const floors = v.byFloor && Object.keys(v.byFloor).length
+          ? Object.entries(v.byFloor).map(([f,n]) => `${f}F:${n}`).join(' · ')
+          : '—';
+        return `<tr><td>${bldg}</td><td>${v.totalBoxes || 0}</td><td style="font-size:11px;color:var(--t3)">${floors}</td><td>${(v.kcal || 0).toFixed(1)}</td></tr>`;
+      }).join('')}</tbody>
+    </table>` : '';
+  document.getElementById('rec-detail').innerHTML = `
+    <h3>📋 ${(r.date || '').replace(/-/g,'.')} · ${r.worker || '—'}${r.company ? ' · '+r.company : ''}</h3>
+    <div class="profile">
+      <div class="avatar">${(r.worker || '?').slice(0,1)}</div>
+      <div class="profile-info">
+        <div class="profile-name">${r.worker || '—'}</div>
+        <div class="profile-sub">${r.worker_id || ''}${r.camp ? ' · ' + r.camp : ''}</div>
+      </div>
+    </div>
+    <div class="d-grid">
+      <div class="d-cell"><div class="d-cell-label">완료 배송</div><div class="d-cell-val">${r.dels || 0}건</div></div>
+      <div class="d-cell"><div class="d-cell-label">총 에너지</div><div class="d-cell-val">${(r.totJ || 0).toLocaleString()} J</div></div>
+      <div class="d-cell"><div class="d-cell-label">총 칼로리</div><div class="d-cell-val">${(+r.totKc || 0).toFixed(2)} kcal</div></div>
+      <div class="d-cell"><div class="d-cell-label">최대 WSI</div><div class="d-cell-val" style="color:${wsiColor}">${wsi.toFixed(3)}</div></div>
+      <div class="d-cell"><div class="d-cell-label">근무 시간</div><div class="d-cell-val">${dur}</div></div>
+    </div>
+    <h3 style="margin-top:14px">📦 배송별 기록 (${dels.length}건)</h3>
+    <table style="margin-top:8px">
+      <thead><tr><th>배송지</th><th>층</th><th>예측(J)</th><th>실측(J)</th><th>상태</th></tr></thead>
+      <tbody>${dels.length ? dels.map(d => `<tr>
+        <td>${d.addr || ''} ${d.photoTaken ? '📸' : ''}</td>
+        <td>${d.floor || ''}F</td>
+        <td>${d.predJ || 0}</td>
+        <td>${d.status === 'done' ? (d.actualJ || 0) : '—'}</td>
+        <td>${d.status === 'done' ? '<span class="badge b-ok">완료</span>' : '<span class="badge b-info">미완료</span>'}</td>
+      </tr>`).join('') : '<tr><td colspan="5" style="color:var(--t3)">상세 배송 기록 없음</td></tr>'}</tbody>
+    </table>
+    ${mcSection}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DELIVERY DATASETS — all 6 company+date sets from /deliveries
+// ═══════════════════════════════════════════════════════════
+const EXPECTED_DATASETS = [
+  ['쿠팡','2026-05-28'],['쿠팡','2026-05-29'],
+  ['쿠팡','2026-06-01'],['쿠팡','2026-06-02'],
+];
+
+async function loadDatasets() {
+  const srv = localStorage.getItem('dashboard_srv_url') || '';
+  let datasets = [];
+  if (srv) {
+    try {
+      const r = await fetch(srv + '/deliveries', { headers:{ 'ngrok-skip-browser-warning':'true' }, signal: AbortSignal.timeout(7000) });
+      if (r.ok) { const d = await r.json(); datasets = (d && d.datasets) || []; }
+    } catch(e) {}
+  }
+  renderDatasets(datasets, srv);
+}
+
+function renderDatasets(datasets, srv) {
+  const found = {};
+  datasets.forEach(d => { found[d.company + '__' + d.date] = d; });
+
+  // KPI summary
+  const totalBoxes = datasets.reduce((s,d)=>s+(d.boxes||0),0);
+  document.getElementById('ds-kpi').innerHTML = [
+    { label:'적재된 데이터셋', val: `${datasets.length} / 4`, sub:'쿠팡 × 4일' },
+    { label:'총 박스', val: totalBoxes.toLocaleString(), sub:'4일치 합계' },
+    { label:'서버 연결', val: srv ? '연결됨' : '미연결', sub: srv ? srv.replace(/^https?:\/\//,'').slice(0,24) : '설정에서 URL 입력' },
+  ].map(k => `<div class="kpi"><div class="kpi-label">${k.label}</div><div class="kpi-val">${k.val}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
+
+  // List with expected 6 rows (shows missing ones too)
+  document.getElementById('ds-list').innerHTML = EXPECTED_DATASETS.map(([co, dt]) => {
+    const d = found[co + '__' + dt];
+    const icon = co === '쿠팡' ? '📦' : '🚛';
+    if (d) {
+      return `<div class="row-click" style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px" onclick="previewDataset('${co}','${dt}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-weight:800;font-size:14px">${icon} ${co}</div>
+          <div style="font-size:11px;color:var(--t3)">${dt.replace(/-/g,'.')}</div></div>
+          <span class="badge b-ok">${d.boxes}박스 · ${d.buildings}건물</span>
+        </div></div>`;
+    }
+    return `<div style="padding:12px;border:1px dashed var(--border);border-radius:10px;margin-bottom:8px;opacity:.6">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:800;font-size:14px">${icon} ${co}</div>
+        <div style="font-size:11px;color:var(--t3)">${dt.replace(/-/g,'.')}</div></div>
+        <span class="badge b-warn">미적재</span>
+      </div></div>`;
+  }).join('');
+}
+
+function previewDataset(company, date) {
+  const srv = localStorage.getItem('dashboard_srv_url') || '';
+  const iframe = document.getElementById('ds-heatmap-iframe');
+  if (!srv) { iframe.srcdoc = '<div style="font-family:sans-serif;padding:40px;color:#888">설정에서 서버 URL을 입력하세요</div>'; return; }
+  const q = new URLSearchParams({ company, date, srv });
+  iframe.src = srv + '/heatmap?' + q.toString();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REFRESH LOOP
+// ═══════════════════════════════════════════════════════════
+function refreshAll() {
+  renderOverview();
+}
+
+// Restore saved server URL
+const savedUrl = localStorage.getItem('dashboard_srv_url');
+if (savedUrl) {
+  const inp = document.getElementById('set-srv');
+  if (inp) inp.value = savedUrl;
+}
+
+// Initial render + auto-refresh every 5s
+renderOverview();
+loadRealDailyStats().then(() => renderOverview());          // 서버에서 실데이터 일별 통계 계산
+setInterval(renderOverview, 5000);
+setInterval(() => loadRealDailyStats().then(() => renderOverview()), 60000);  // 1분마다 재계산
+</script>
+</body>
+</html>
