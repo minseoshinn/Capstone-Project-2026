@@ -1,0 +1,3036 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>에너지맵 v3 — 한국외대 글로벌캠퍼스</title> 
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script> 
+if (typeof L === 'undefined') {
+  document.write('<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"><\/script>');
+}
+</script>
+<style> 
+.leaflet-control-attribution{font-size:9px;opacity:.7;}
+.leaflet-container{background:#e8eef2;font:inherit;} 
+.nv-divicon{background:transparent;border:none;margin:0 !important;width:auto !important;height:auto !important;}
+</style>
+<script> 
+(function(){
+  const L = window.L;
+  if(!L){ console.error('Leaflet 로드 실패'); return; }
+
+  // ── LatLng ──
+  class LatLng {
+    constructor(lat, lng){ this.y = +lat; this.x = +lng; this._lat=+lat; this._lng=+lng; }
+    lat(){ return this._lat; }
+    lng(){ return this._lng; }
+  }
+  const toLL = (p)=> L.latLng(p._lat ?? p.lat(), p._lng ?? p.lng());
+
+  // ── Point (마커 anchor용) ──
+  class Point { constructor(x,y){ this.x=x; this.y=y; } }
+
+  // ── Map ──
+  class NMap {
+    constructor(elId, opts){
+      opts = opts || {};
+      const c = opts.center || new LatLng(37.336,127.260);
+      const z = opts.zoom || 15;
+      this._map = L.map(elId, {
+        center: [c.lat(), c.lng()],
+        zoom: z,
+        zoomControl: true,
+        attributionControl: true, 
+        zoomSnap: 1, zoomDelta: 1, wheelPxPerZoomLevel: 80
+      });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20, minZoom: 11,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(this._map);
+      this._listeners = {};
+      this._map.on('zoomend', ()=> this._fire('zoom_changed'));
+      this._map.on('click',  ()=> this._fire('click'));
+    }
+    getZoom(){ return Math.round(this._map.getZoom()); }
+    setZoom(z){ this._map.setZoom(z); }
+    getCenter(){ const c=this._map.getCenter(); return new LatLng(c.lat,c.lng); }
+    setCenter(ll){ this._map.panTo([ll.lat(), ll.lng()]); }
+    panTo(ll){ this._map.panTo([ll.lat(), ll.lng()]); }
+    fitBounds(b){ this._map.fitBounds(b); }
+    _on(type, fn){ (this._listeners[type] ||= []).push(fn); }
+    _fire(type){ (this._listeners[type]||[]).forEach(fn=>{ try{fn();}catch(e){console.warn(e);} }); }
+    get leaflet(){ return this._map; }
+  }
+
+  // ── 오버레이 공통 베이스: setMap(map|null) 패턴 ──
+  class Overlay {
+    constructor(){ this._layer=null; this._cur=null; this._clickFns=[]; }
+    setMap(m){
+      if(m && m._map){
+        if(this._cur !== m){ this._layer.addTo(m._map); this._cur = m; }
+      } else {
+        if(this._cur){ this._cur._map.removeLayer(this._layer); this._cur=null; }
+      }
+    }
+    getMap(){ return this._cur; }
+    _bindClick(){
+      this._layer.on('click', (e)=>{
+        if(e.originalEvent) L.DomEvent.stopPropagation(e);
+        this._clickFns.forEach(fn=>{ try{fn();}catch(err){console.warn(err);} });
+      });
+    }
+    _addClick(fn){ this._clickFns.push(fn); }
+  }
+
+  // ── Circle (히트맵 원) ── 반경은 미터 단위 ──
+  class Circle extends Overlay {
+    constructor(o){
+      super();
+      const c = o.center;
+      this._layer = L.circle([c.lat(), c.lng()], {
+        radius: o.radius,
+        fillColor: o.fillColor || '#000',
+        fillOpacity: (o.fillOpacity!=null)?o.fillOpacity:0.3,
+        color: o.strokeColor || o.fillColor || '#000',
+        weight: (o.strokeWeight!=null)?o.strokeWeight:0,
+        opacity: (o.strokeOpacity!=null)?o.strokeOpacity:0,
+        interactive: false
+      });
+      this._bindClick();
+      if(o.map) this.setMap(o.map);
+    }
+    setRadius(r){ this._layer.setRadius(r); }
+    setCenter(ll){ this._layer.setLatLng([ll.lat(), ll.lng()]); }
+  }
+
+  // ── Marker (HTML content 아이콘) ──
+  class Marker extends Overlay {
+    constructor(o){
+      super();
+      const p = o.position;
+      let icon;
+      if(o.icon && o.icon.content){
+        const content = o.icon.content; 
+        const selfPositioned = /transform\s*:\s*translate/.test(content);
+        const a = o.icon.anchor || new Point(0,0);
+        icon = L.divIcon({
+          className: 'nv-divicon',
+          html: content,
+          iconAnchor: selfPositioned ? [0,0] : [a.x, a.y],
+          iconSize:   selfPositioned ? [0,0] : null
+        });
+      } else {
+        icon = new L.Icon.Default();
+      }
+      this._layer = L.marker([p.lat(), p.lng()], { icon, riseOnHover:true });
+      this._bindClick();
+      if(o.map) this.setMap(o.map);
+    }
+    setPosition(ll){ this._layer.setLatLng([ll.lat(), ll.lng()]); }
+    getPosition(){ const l=this._layer.getLatLng(); return new LatLng(l.lat,l.lng); }
+  }
+
+  // ── Polyline ──
+  class Polyline extends Overlay {
+    constructor(o){
+      super();
+      const pts = (o.path||[]).map(p=>[p.lat(), p.lng()]);
+      const dashed = (o.strokeStyle==='dash' || o.strokeStyle==='shortdash');
+      this._layer = L.polyline(pts, {
+        color: o.strokeColor || '#333',
+        weight: (o.strokeWeight!=null)?o.strokeWeight:3,
+        opacity: (o.strokeOpacity!=null)?o.strokeOpacity:1,
+        dashArray: dashed ? '6 8' : null,
+        interactive: false
+      });
+      this._bindClick();
+      if(o.map) this.setMap(o.map);
+    }
+    setPath(path){ this._layer.setLatLngs((path||[]).map(p=>[p.lat(),p.lng()])); }
+  }
+
+  // ── Event ──
+  const Event = {
+    addListener(target, type, fn){
+      if(target instanceof NMap){ target._on(type, fn); return; }
+      if(target && target._addClick && (type==='click')){ target._addClick(fn); return; }
+      // 기타: leaflet 레이어 직접 이벤트
+      if(target && target._layer){ target._layer.on(type, fn); }
+    }
+  };
+
+  // ── MapTypeId (더미) ──
+  const MapTypeId = { NORMAL:'normal', TERRAIN:'terrain', SATELLITE:'satellite', HYBRID:'hybrid' };
+
+  // 전역 노출
+  window.naver = window.naver || {};
+  window.naver.maps = {
+    Map: NMap, LatLng, Point, Circle, Marker, Polyline, Event, MapTypeId
+  };
+})();
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Noto Sans KR','Segoe UI',sans-serif;background:#f5f5f5;height:100vh;overflow:hidden;}
+#app{display:flex;height:100vh;}
+
+#sidebar{width:320px;flex-shrink:0;background:#fff;display:flex;flex-direction:column;z-index:10;box-shadow:2px 0 12px rgba(0,0,0,0.08);transition:transform .3s ease;}
+#sidebar-header{padding:14px 16px 10px;border-bottom:1px solid #f0f0f0;}
+#sidebar-header h1{font-size:15px;font-weight:700;color:#111;}
+#sidebar-header p{font-size:11px;color:#999;margin-top:2px;}
+
+.tab-row{display:flex;border-bottom:1px solid #f0f0f0;background:#fafafa;}
+.tab-btn{flex:1;padding:9px 0;font-size:11px;font-weight:600;color:#aaa;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
+.tab-btn.active{color:#03c75a;border-bottom-color:#03c75a;background:#fff;}
+
+.panel{flex:1;overflow-y:auto;display:none;}
+.panel.active{display:block;}
+
+/* 에너지 랭킹 */
+.rank-item{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;border-left:3px solid transparent;transition:background .1s;}
+/* 에너지탭 모드 토글 */
+.etab-toggle{display:flex;padding:8px 14px;gap:6px;border-bottom:1px solid #f0f0f0;background:#fafafa;}
+.etab-btn{flex:1;padding:6px 8px;font-size:11px;font-weight:700;border:1.5px solid #e0e0e0;border-radius:7px;background:#fff;color:#888;cursor:pointer;transition:all .15s;}
+.etab-btn.on-sim{background:#eff6ff;border-color:#2563eb;color:#1d4ed8;}
+.etab-btn.on-calc{background:#f0fdf4;border-color:#10b981;color:#065f46;}
+/* 오늘 계산 입력 폼 */
+.calc-form{padding:10px 14px;}
+.calc-row{display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid #f5f5f5;}
+.calc-bldg{font-size:11px;font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.calc-input{width:44px;padding:4px 5px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:12px;text-align:center;font-family:inherit;}
+.calc-input:focus{outline:none;border-color:#10b981;}
+.calc-result{font-size:12px;font-weight:800;min-width:52px;text-align:right;}
+.calc-range{font-size:9px;color:#aaa;min-width:52px;text-align:right;}
+.calc-header{display:flex;align-items:center;gap:6px;padding:6px 0 8px;border-bottom:1.5px solid #e0e0e0;margin-bottom:2px;}
+.calc-header span{font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;}
+.calc-total{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#f0fdf4;border-top:1.5px solid #10b981;margin-top:4px;}
+/* 층별 입력 */
+.floor-toggle{font-size:10px;font-weight:700;color:#2563eb;cursor:pointer;background:none;border:none;padding:0;margin-left:4px;white-space:nowrap;font-family:inherit;}
+.floor-grid{display:none;padding:6px 8px 8px 20px;background:#f8fafc;border-radius:8px;margin:4px 0;flex-wrap:wrap;gap:4px;}
+.floor-grid.open{display:flex;}
+.floor-cell{display:flex;align-items:center;gap:3px;font-size:10px;color:#555;}
+.floor-cell label{font-weight:700;min-width:22px;}
+.floor-cell input{width:34px;padding:2px 4px;border:1px solid #d1d5db;border-radius:5px;font-size:11px;text-align:center;font-family:inherit;}
+.calc-total-label{font-size:11px;font-weight:700;color:#065f46;}
+.calc-total-val{font-size:16px;font-weight:900;color:#10b981;font-family:'DM Mono',monospace;}
+.rank-item:hover{background:#f8f8f8;}
+.rank-item.active{background:#f0fdf6;border-left-color:#03c75a;}
+.rank-num{font-size:11px;font-weight:700;color:#ccc;width:16px;text-align:center;flex-shrink:0;}
+.rank-num.r1{color:#ef4444;}.rank-num.r2{color:#f97316;}.rank-num.r3{color:#f59e0b;}
+.rdot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.rinfo{flex:1;min-width:0;}
+.rname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rsub{font-size:10px;color:#999;margin-top:1px;}
+.rkcal{font-size:12px;font-weight:700;}
+.rrange{font-size:10px;color:#bbb;margin-top:1px;}
+
+/* 배송현황 */
+.status-filter{display:flex;gap:5px;padding:8px 14px;border-bottom:1px solid #f5f5f5;}
+.sf-btn{flex:1;padding:5px 2px;font-size:10px;font-weight:700;border-radius:5px;border:1.5px solid #e5e5e5;background:#fff;cursor:pointer;color:#888;transition:all .15s;}
+.sf-btn.on-complete{background:#dcfce7;border-color:#16a34a;color:#16a34a;}
+.sf-btn.on-scan{background:#fef9c3;border-color:#ca8a04;color:#ca8a04;}
+.sf-btn.on-wait{background:#fee2e2;border-color:#dc2626;color:#dc2626;}
+.sf-btn.on-all{background:#f0f9ff;border-color:#0284c7;color:#0284c7;}
+.delivery-item{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;border-left:3px solid transparent;transition:background .1s;}
+.delivery-item:hover{background:#f8f8f8;}
+.d-badge{padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;flex-shrink:0;}
+.d-complete{background:#dcfce7;color:#16a34a;}
+.d-scan{background:#fef9c3;color:#ca8a04;}
+.d-wait{background:#fee2e2;color:#dc2626;}
+.d-info{flex:1;min-width:0;}
+.d-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.d-sub{font-size:10px;color:#999;margin-top:1px;}
+.d-cnt{font-size:12px;font-weight:700;color:#555;flex-shrink:0;}
+
+/* 최적화 탭 */
+/* 네이버 경로추천 스타일 */
+.route-cards{display:flex;flex-direction:column;gap:0;background:#fff;}
+.route-card{display:flex;align-items:stretch;padding:14px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;transition:background .15s;position:relative;gap:12px;}
+.route-card:hover{background:#f8f9fa;}
+.route-card.selected-energy{background:#fffbf0;border-left:4px solid #f59e0b;}
+.route-card.selected-group{background:#f0f7ff;border-left:4px solid #0284c7;}
+.route-card:not(.selected-energy):not(.selected-group){border-left:4px solid transparent;}
+.route-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;margin-top:2px;}
+.route-icon.energy{background:#fff3cd;}
+.route-icon.group{background:#e0f2fe;}
+.route-body{flex:1;min-width:0;}
+.route-name{font-size:13px;font-weight:800;color:#111;display:flex;align-items:center;gap:6px;}
+.route-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;white-space:nowrap;}
+.route-badge.rec{background:#03c75a;color:#fff;}
+.route-badge.fast{background:#f59e0b;color:#fff;}
+.route-stats{display:flex;gap:10px;margin-top:5px;align-items:baseline;}
+.route-kcal{font-size:20px;font-weight:900;line-height:1;}
+.route-kcal.energy{color:#d97706;}
+.route-kcal.group{color:#0369a1;}
+.route-unit{font-size:10px;color:#888;margin-left:1px;}
+.route-dist{font-size:11px;color:#888;margin-left:4px;}
+.route-sub{font-size:10px;color:#6b7280;margin-top:4px;line-height:1.4;}
+.route-check{width:20px;height:20px;border-radius:50%;border:2px solid #ddd;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;transition:all .15s;}
+.route-card.selected-energy .route-check{background:#f59e0b;border-color:#f59e0b;color:#fff;}
+.route-card.selected-group .route-check{background:#0284c7;border-color:#0284c7;color:#fff;}
+
+.opt-compare{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 14px;border-bottom:1px solid #f0f0f0;background:#fafafa;}
+.cmp-box{background:#fff;border-radius:8px;padding:8px;border:1px solid #e5e5e5;text-align:center;}
+.cmp-box.active{border-color:#03c75a;background:#f0fdf6;}
+.cmp-label{font-size:9px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px;}
+.cmp-val{font-size:14px;font-weight:800;color:#333;}
+.cmp-unit{font-size:9px;color:#aaa;}
+.cmp-sub{font-size:10px;color:#666;margin-top:3px;}
+
+.opt-header{padding:8px 14px;background:#f0fdf6;border-bottom:1px solid #dcfce7;}
+.opt-title{font-size:12px;font-weight:700;color:#166534;}
+.opt-sub-text{font-size:10px;color:#4ade80;margin-top:1px;}
+
+.opt-item{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;border-left:3px solid transparent;transition:background .1s;}
+.opt-item:hover{background:#f8f8f8;}
+.opt-step{width:24px;height:24px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.opt-step.energy-step{background:#f59e0b;}
+.opt-step.group-step{background:#0284c7;}
+.opt-step.done-step{background:#d1fae5;color:#059669;}
+.opt-info{flex:1;min-width:0;}
+.opt-name{font-size:12px;font-weight:600;}
+.opt-detail{font-size:10px;color:#6b7280;margin-top:1px;}
+.opt-right{text-align:right;flex-shrink:0;}
+.opt-kcal{font-size:11px;font-weight:700;}
+.opt-dist{font-size:10px;color:#aaa;margin-top:1px;}
+
+.group-divider{padding:5px 14px;background:#f8fafc;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;}
+.group-divider span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;}
+
+/* 지도 */
+#map-wrap{flex:1;position:relative;}
+#map{width:100%;height:100%;}
+#zoom-badge{position:absolute;top:calc(94px + env(safe-area-inset-top, 0px));left:50%;transform:translateX(-50%);z-index:500;background:#fff;border:1px solid #e0e0e0;border-radius:20px;padding:5px 14px;font-size:11px;font-weight:600;color:#555;box-shadow:0 1px 4px rgba(0,0,0,.12);pointer-events:none;}
+ 
+#toggle-bar{position:fixed;top:calc(8px + env(safe-area-inset-top, 0px));left:10px;right:10px;z-index:700;display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;justify-content:flex-start;padding:6px 8px;-webkit-overflow-scrolling:touch;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.08);white-space:nowrap;}
+#toggle-bar::-webkit-scrollbar{display:none}
+#toggle-bar .tbtn{flex:0 0 auto;}
+@media(min-width:641px){#toggle-bar{left:auto;right:14px;max-width:calc(100vw - 28px);}}
+.tbtn{background:#fff;border:1px solid #e0e0e0;border-radius:16px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;color:#555;box-shadow:0 1px 4px rgba(0,0,0,.1);transition:all .15s;}
+.tbtn.on{background:#03c75a;color:#fff;border-color:#03c75a;}
+.tbtn.on-energy{background:#f59e0b;color:#fff;border-color:#f59e0b;}
+.tbtn.on-group{background:#0284c7;color:#fff;border-color:#0284c7;}
+
+/* GPS 현재 위치 파란 점 펄스 애니메이션 */
+@keyframes pulse{
+  0%{transform:scale(.8);opacity:.45;}
+  70%{transform:scale(2.2);opacity:0;}
+  100%{transform:scale(2.2);opacity:0;}
+}
+#gps-btn{position:fixed;bottom:80px;right:14px;z-index:800;background:#fff;border:2px solid #3b82f6;border-radius:22px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;color:#3b82f6;box-shadow:0 4px 16px rgba(59,130,246,.25);display:flex;align-items:center;gap:6px;transition:all .2s;}
+#gps-btn.active{background:#3b82f6;color:#fff;border-color:#3b82f6;box-shadow:0 4px 20px rgba(59,130,246,.4);}
+
+#legend{position:absolute;bottom:28px;right:14px;z-index:500;background:#fff;border-radius:10px;padding:10px 12px;box-shadow:0 2px 10px rgba(0,0,0,.12);font-size:11px;}
+#legend h4{font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;}
+
+#detail{position:absolute;bottom:20px;left:14px;z-index:500;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 4px 20px rgba(0,0,0,.15);width:260px;display:none;}
+#dc{position:absolute;top:8px;right:10px;background:none;border:none;font-size:18px;color:#aaa;cursor:pointer;}
+#dn{font-size:14px;font-weight:700;margin-bottom:2px;}
+#dm{font-size:11px;color:#888;margin-bottom:10px;}
+.dsr{display:flex;gap:6px;margin-bottom:8px;}
+.ds{flex:1;background:#f8f8f8;border-radius:7px;padding:7px 8px;}
+.dsl{font-size:9px;color:#888;margin-bottom:2px;}
+.dsv{font-size:14px;font-weight:700;}
+.dsu{font-size:9px;color:#888;}
+.drb{height:4px;background:#f0f0f0;border-radius:2px;overflow:hidden;margin:6px 0 2px;}
+.drf{height:100%;border-radius:2px;}
+.drt{display:flex;justify-content:space-between;font-size:10px;color:#aaa;margin-bottom:8px;}
+.dir{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f5f5f5;font-size:11px;}
+.dir:last-child{border:none;}
+.dk{color:#888;}.dv{font-weight:600;color:#333;}
+
+#collapse-btn{position:absolute;top:50%;right:-26px;transform:translateY(-50%);width:26px;height:52px;background:#fff;border:1px solid #e0e0e0;border-left:none;border-radius:0 7px 7px 0;cursor:pointer;font-size:10px;color:#888;display:flex;align-items:center;justify-content:center;box-shadow:2px 0 6px rgba(0,0,0,.08);z-index:10;}
+#sidebar.collapsed{transform:translateX(-100%);}
+
+#mob-toggle{display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:700;background:#03c75a;color:#fff;border:none;border-radius:22px;padding:11px 22px;font-size:13px;font-weight:700;box-shadow:0 4px 16px rgba(3,199,90,.4);cursor:pointer;}
+#mob-close{display:none;}
+/* 층별 에너지 차트 */
+.floor-chart{margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0;}
+.floor-chart-title{font-size:9px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;}
+.floor-row{display:flex;align-items:center;gap:5px;margin-bottom:3px;}
+.floor-label{font-size:9px;color:#888;min-width:22px;text-align:right;}
+.floor-bar-bg{flex:1;height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden;}
+.floor-bar-fill{height:100%;border-radius:4px;transition:width .3s;}
+.floor-val{font-size:9px;font-weight:700;min-width:36px;text-align:right;}
+/* 온도 위험도 뱃지 */
+.heat-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:8px;margin-left:3px;}
+.hb-ok{background:#dcfce7;color:#166534;}
+.hb-warn{background:#fef9c3;color:#854d0e;}
+.hb-danger{background:#ffedd5;color:#9a3412;}
+.hb-critical{background:#fee2e2;color:#991b1b;}
+/* 열환경 배너 */
+.heat-bar{display:flex;align-items:center;gap:8px;padding:7px 14px;font-size:11px;font-weight:600;border-bottom:1px solid #f0f0f0;transition:background .3s;flex-wrap:wrap;}
+.heat-bar.ok{background:#f0fdf4;color:#166534;}
+.heat-bar.warn{background:#fefce8;color:#854d0e;}
+.heat-bar.danger{background:#fff7ed;color:#9a3412;}
+.heat-bar.critical{background:#fef2f2;color:#991b1b;}
+.heat-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;}
+.heat-input{display:flex;align-items:center;gap:5px;margin-left:auto;flex-wrap:wrap;}
+.heat-input input{width:44px;padding:3px 5px;border:1px solid #e0e0e0;border-radius:6px;font-size:11px;text-align:center;}
+.heat-input label{font-size:10px;color:#888;}
+@media(max-width:640px){
+  #collapse-btn{display:none;}
+  #mob-toggle{display:block;}
+  #mob-close{display:block;position:absolute;top:10px;right:14px;background:none;border:none;font-size:22px;color:#666;cursor:pointer;line-height:1;padding:4px 8px;z-index:2;}
+  #app{flex-direction:column;} 
+  #sidebar{
+    width:100%;
+    order:2;
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    height:88vh;
+    border-radius:18px 18px 0 0;
+    box-shadow:0 -4px 20px rgba(0,0,0,.15);
+    transform:translateY(100%);
+    transition:transform .3s ease;
+    z-index:600;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  #sidebar.open{transform:translateY(0);}
+  /* Drag handle visible above the header */
+  #sidebar-header{position:relative;padding-top:22px !important;flex-shrink:0;}
+  #sidebar-header::before{content:'';display:block;width:42px;height:4px;background:#cbd5e1;border-radius:3px;position:absolute;top:8px;left:50%;transform:translateX(-50%);}
+  /* Inner panels must scroll */
+  .panel{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;}
+  #map-wrap{order:1;height:100vh;width:100%;}
+  #detail{width:calc(100% - 28px);bottom:70px;}
+  #legend{bottom:70px;}
+  /* When panel is open, push the "패널 보기" button up so it sits above the panel as a close handle */
+  #sidebar.open ~ #mob-toggle{bottom:calc(88vh + 10px);background:#dc2626;}
+}
+/* Mobile debug log overlay — appears only if a window error fires */
+#dbg-log{display:none;position:fixed;top:0;left:0;right:0;background:rgba(220,38,38,.95);color:#fff;font:11px/1.4 monospace;padding:8px 12px;z-index:9999;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all;}
+#dbg-log button{background:#fff;color:#dc2626;border:none;padding:2px 8px;border-radius:4px;font:11px monospace;float:right;margin-left:6px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="dbg-log"><button onclick="document.getElementById('dbg-log').style.display='none'">✕</button><span id="dbg-log-msg"></span></div>
+<script>
+// Surface JS errors on-screen — Safari mobile has no devtools by default.
+(function(){
+  function showErr(msg){
+    var el = document.getElementById('dbg-log');
+    var m  = document.getElementById('dbg-log-msg');
+    if (!el || !m) return;
+    el.style.display = 'block';
+    m.textContent = (m.textContent ? m.textContent + '\n\n' : '') + msg;
+  }
+  window.addEventListener('error', function(e){
+    showErr('❌ ' + (e.message || 'unknown error') + '\n  at ' + (e.filename||'').split('/').pop() + ':' + e.lineno + ':' + e.colno);
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    showErr('❌ unhandled promise: ' + (e.reason && e.reason.message || e.reason || 'unknown'));
+  });
+})();
+</script>
+<button id="mob-toggle" onclick="toggleSidebar()">📊 패널 보기</button>
+<div id="app">
+  <div id="sidebar">
+    <button id="collapse-btn" onclick="toggleCollapse()">◀</button>
+    <button id="mob-close" onclick="toggleSidebar()">✕</button>
+    <div id="sidebar-header">
+      <h1>⚡ 에너지맵 <span style="font-size:10px;background:#03c75a;color:#fff;border-radius:3px;padding:1px 5px;font-weight:600;vertical-align:middle;">v3</span></h1>
+      <p>한국외대 글로벌캠퍼스 · 에너지 & 배송 최적화</p>
+    </div>
+    <!-- 열환경 카드 (사이드바 상단 고정) -->
+    <div id="heat-bar" class="heat-bar ok">
+      <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+        <div class="heat-dot"></div>
+        <span id="hb-label" style="white-space:nowrap">✅ 열환경 안전</span>
+        <span id="hb-wbgt" style="opacity:.65;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      </div>
+      <div class="heat-input">
+        <label>기온</label>
+        <input type="number" id="inp-temp" value="25" min="-10" max="45" oninput="updateHeat()">℃
+        <label>습도</label>
+        <input type="number" id="inp-hum"  value="60" min="0"   max="100" oninput="updateHeat()">%
+        <button id="btn-weather" onclick="fetchWeatherAuto()"
+          style="padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;font-size:10px;font-weight:700;cursor:pointer;color:#555;white-space:nowrap"
+          title="현재 위치 날씨 자동 적용">🌡️ 자동</button>
+      </div>
+    </div>
+    <div class="tab-row">
+      <button class="tab-btn active" onclick="switchTab('energy')">🔥 에너지</button>
+      <button class="tab-btn" onclick="switchTab('status')">📦 배송현황</button>
+      <button class="tab-btn" onclick="switchTab('optimize')">🗺️ 최적순서</button>
+    </div>
+    <div class="panel active" id="panel-energy">
+      <!-- 모드 토글 -->
+      <div class="etab-toggle">
+        <button class="etab-btn on-sim" id="etab-sim" onclick="switchETab('sim')">📊 시뮬레이션 범위 예측</button>
+        <button class="etab-btn" id="etab-calc" onclick="switchETab('calc')">🧮 오늘 실측 계산</button>
+      </div>
+      <!-- 범위 예측 뷰 -->
+      <div id="view-sim"><div id="ranking-list"></div></div>
+      <!-- 오늘 계산 뷰 -->
+      <div id="view-calc" style="display:none">
+        <div class="calc-form">
+          <div style="font-size:10px;color:#888;padding:6px 0 10px;line-height:1.5">
+            📦 오늘 건물별 박스 수 입력 → 에너지 자동 계산<br>
+            <span style="color:#10b981;font-weight:600">층·무게는 시뮬레이션 평균값 자동 적용</span>
+          </div>
+          <div class="calc-header">
+            <span style="flex:1">건물</span>
+            <span style="width:44px;text-align:center">박스</span>
+            <span style="min-width:52px;text-align:right">예측</span>
+            <span style="min-width:52px;text-align:right">범위</span>
+          </div>
+          <div id="calc-rows"></div>
+        </div>
+        <div class="calc-total" id="calc-total" style="display:none">
+          <span class="calc-total-label">📊 오늘 총 예측 에너지</span>
+          <span class="calc-total-val" id="calc-total-val">— kcal</span>
+        </div>
+      </div>
+    </div>
+    <div class="panel" id="panel-status">
+      <div class="status-filter">
+        <button class="sf-btn on-all" id="sf-all" onclick="filterStatus('all')">전체</button>
+        <button class="sf-btn" id="sf-complete" onclick="filterStatus('complete')">✅완료</button>
+        <button class="sf-btn" id="sf-wait" onclick="filterStatus('wait')">⏳배송대기</button>
+      </div>
+      <div id="delivery-list"></div>
+    </div>
+    <div class="panel" id="panel-optimize">
+      <!-- 네이버 스타일 경로 선택 -->
+      <div class="route-cards" id="route-cards">
+        <div class="route-card selected-energy" id="card-energy" onclick="switchOptMode('energy')">
+          <div class="route-icon energy">🔥</div>
+          <div class="route-body">
+            <div class="route-name">
+              에너지 오름차순
+              <span class="route-badge" style="background:#f59e0b;color:#fff">단순정렬</span>
+            </div>
+            <div class="route-stats">
+              <span class="route-kcal energy" id="rc-e-kcal">—</span>
+              <span class="route-unit">kcal</span>
+              <span class="route-dist" id="rc-e-dist">—</span>
+            </div>
+            <div id="rc-e-fatigue" style="display:none;margin-top:3px;font-size:10px;"></div>
+            <div id="rc-e-travel" style="font-size:9px;color:#888;margin-top:2px"></div>
+            <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;color:#888">
+              <span id="rc-e-road">🛣️ —</span>
+              <span id="rc-e-time">🚗 —</span>
+            </div>
+            <div class="route-sub" id="route-sub-E">🎯 총 피로 최소화 · 저부하→고부하 순서로 피로 누적 지연 (Visentin 2018)</div>
+          </div>
+          <div class="route-check" id="chk-energy">✓</div>
+        </div>
+        <!-- 쿠팡 기본 순서 (비교 기준) -->
+        <div class="route-card" id="card-coupang" onclick="switchOptMode('coupang')"
+          style="border-left:4px solid transparent;opacity:.85;">
+          <div class="route-icon" style="background:#fee2e2;">🚚</div>
+          <div class="route-body">
+            <div class="route-name">
+              현재 배송 순서
+              <span class="route-badge" style="background:#6b7280;color:#fff">기준값</span>
+            </div>
+            <div class="route-stats">
+              <span class="route-kcal" id="rc-c-kcal" style="color:#6b7280">—</span>
+              <span class="route-unit">kcal</span>
+              <span class="route-dist" id="rc-c-dist">—</span>
+            </div>
+            <div id="rc-c-fatigue" style="display:none;margin-top:3px;font-size:10px;"></div>
+            <div id="rc-c-travel" style="font-size:9px;color:#888;margin-top:2px"></div>
+            <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;color:#888">
+              <span id="rc-c-road">🛣️ 계산 중…</span>
+              <span id="rc-c-time">🚗 —</span>
+            </div>
+            <div class="route-sub" style="color:#9ca3af">기숙사E→D→A→B→C→학생→어문→인문→교양→후생→공학→창업→자연→백년</div>
+          </div>
+          <div class="route-check" id="chk-coupang"></div>
+        </div>
+        <div class="route-card" id="card-group" onclick="switchOptMode('group')">
+          <div class="route-icon group">📍</div>
+          <div class="route-body">
+            <div class="route-name">
+              그룹+최단거리
+              <span class="route-badge fast">거리최적</span>
+            </div>
+            <div class="route-stats">
+              <span class="route-kcal group" id="rc-g-kcal">—</span>
+              <span class="route-unit">kcal</span>
+              <span class="route-dist" id="rc-g-dist">—</span>
+            </div>
+            <div id="rc-g-fatigue" style="display:none;margin-top:3px;font-size:10px;"></div>
+            <div id="rc-g-travel" style="font-size:9px;color:#888;margin-top:2px"></div>
+            <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;color:#888">
+              <span id="rc-g-road">🛣️ —</span>
+              <span id="rc-g-time">🚗 —</span>
+            </div>
+            <div class="route-sub" id="route-sub-G">🎯 이동거리 최소화 · 차량 동선만 최적화 (Nearest Neighbor TSP)</div>
+          </div>
+          <div class="route-check" id="chk-group"></div>
+        </div>
+        <!-- 작업강도 균등분배 (load-balancing) -->
+        <div class="route-card" id="card-balance" onclick="switchOptMode('balance')">
+          <div class="route-icon" style="background:#ede9fe;">⚖️</div>
+          <div class="route-body">
+            <div class="route-name">
+              힘든 거 균등분배
+              <span class="route-badge rec">추천</span>
+            </div>
+            <div class="route-stats">
+              <span class="route-kcal" id="rc-b-kcal" style="color:#7c3aed">—</span>
+              <span class="route-unit">kcal</span>
+              <span class="route-dist" id="rc-b-dist">—</span>
+            </div>
+            <div id="rc-b-fatigue" style="display:none;margin-top:3px;font-size:10px;"></div>
+            <div id="rc-b-travel" style="font-size:9px;color:#888;margin-top:2px"></div>
+            <div class="route-sub" id="route-sub-B">🎯 피로 피크 최소화 · 고부하·저부하 번갈아 배치로 회복 시간 확보</div>
+          </div>
+          <div class="route-check" id="chk-balance"></div>
+        </div>
+      </div>
+      <!-- 순서 리스트 -->
+      <div id="optimize-list"></div>
+    </div>
+  </div>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="zoom-badge">🏫 캠퍼스 전체</div>
+    <button id="gps-btn" onclick="goMyLocation()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      📍 내 위치
+    </button>
+    <div id="toggle-bar">
+      <button class="tbtn on" id="btn-heat" onclick="toggleLayer('heat')">히트맵</button>
+      <button class="tbtn on" id="btn-bubble" onclick="toggleLayer('bubble')">버블</button>
+      <button class="tbtn" id="btn-footprint" onclick="toggleFootprint()" style="border-color:#e11d48;color:#e11d48">📍실측</button>
+      <button class="tbtn" onclick="clearFootprint()" style="border-color:#9ca3af;color:#9ca3af;font-size:9px" title="실측 데이터 초기화">🗑️</button>
+      <button class="tbtn" id="btn-route-coupang" onclick="pickRouteOnly('coupang')" style="border-color:#6b7280;color:#6b7280">🚚현재</button>
+      <button class="tbtn" id="btn-route-energy" onclick="pickRouteOnly('energy')" style="border-color:#f59e0b;color:#f59e0b">🔥에너지</button>
+      <button class="tbtn" id="btn-route-group" onclick="pickRouteOnly('group')" style="border-color:#0284c7;color:#0284c7">📍거리</button>
+      <button class="tbtn" id="btn-route-balance" onclick="pickRouteOnly('balance')" style="border-color:#7c3aed;color:#7c3aed">⚖️균등</button>
+      <button class="tbtn" id="btn-route-off" onclick="pickRouteOnly(null)" style="font-size:9px">경로끄기</button>
+      <button class="tbtn" id="btn-road" onclick="toggleRoadMode()">🛣️ 도로경로</button>
+    </div>
+    <div id="legend">
+      <h4>에너지 강도</h4>
+      <div style="width:80px;height:7px;border-radius:3px;background:linear-gradient(to right,#22c55e,#84cc16,#f59e0b,#ef4444,#b91c1c);margin-bottom:3px"></div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#aaa;width:80px;margin-bottom:8px"><span>낮음</span><span>높음</span></div>
+      <h4>경로</h4>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#555"><div style="width:18px;height:3px;background:#f59e0b;border-radius:2px"></div>에너지순</div>
+        <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#555"><div style="width:18px;height:3px;background:#0284c7;border-radius:2px"></div>그룹+거리</div>
+      </div>
+    </div>
+
+    <div id="detail">
+      <button id="dc" onclick="closeDetail()">×</button>
+      <div id="dn"></div><div id="dm"></div>
+      <div class="dsr">
+        <div class="ds"><div class="dsl">평균 에너지</div><div class="dsv" id="d-mean"></div><div class="dsu">kcal</div></div>
+        <div class="ds"><div class="dsl">배송상태</div><div style="margin-top:4px" id="d-status"></div></div>
+      </div>
+      <div class="drb"><div class="drf" id="d-bar"></div></div>
+      <div class="drt"><span id="d-p10"></span><span id="d-p90"></span></div>
+      <div class="dir"><span class="dk">최고층</span><span class="dv" id="d-floor"></span></div>
+      <div class="dir"><span class="dk">엘리베이터</span><span class="dv" id="d-elev"></span></div>
+      <div class="dir"><span class="dk">배송방식</span><span class="dv" id="d-dm"></span></div>
+      <div class="dir"><span class="dk">🔥에너지순 순서</span><span class="dv" id="d-erank"></span></div>
+      <div class="dir"><span class="dk">📍그룹+거리순 순서</span><span class="dv" id="d-grank"></span></div>
+      <!-- 온도 위험도 -->
+      <div class="dir" id="d-heat-row" style="display:none">
+        <span class="dk">🌡️ 온도 위험도</span>
+        <span class="dv" id="d-heat-risk"></span>
+      </div>
+      <!-- 층별 에너지 차트 -->
+      <div class="floor-chart" id="d-floor-chart"></div>
+    </div>
+  </div>
+</div>
+
+<script> 
+const Z_REGION = 15;   // 지역 마커 시작 (올림)
+const Z_BUBBLE = 18;   // 건물 버블 시작 (가까이 가야 표시)
+const Z_ROUTE  = 18;   // 경로 번호 마커 시작 (올림)
+const ZOOM_TH  = Z_BUBBLE;  // 버블 표시 임계값 (원본 누락 변수 보정)
+
+// ── 열환경 계산 
+let heatState = { temp: 25, hum: 60, wbgt: 18.5, multiplier: 1.0, risk: 'ok' };
+
+function approxWBGT(tempC, rhPct, sunCond='full_sun') {
+  // Stull (2011) 습구온도 근사식
+  const Tw = tempC * Math.atan(0.151977 * Math.sqrt(rhPct + 8.313659))
+    + Math.atan(tempC + rhPct)
+    - Math.atan(rhPct - 1.676331)
+    + 0.00391838 * Math.pow(rhPct, 1.5) * Math.atan(0.023101 * rhPct)
+    - 4.686035;
+  const Tg = sunCond === 'full_sun' ? tempC + 10 : sunCond === 'partly_cloudy' ? tempC + 4 : tempC;
+  return 0.7 * Tw + 0.2 * Tg + 0.1 * tempC;
+}
+
+function nioshREL(metabolicW) {
+  // NIOSH (2016) REL for acclimatized workers
+  return 56.7 - 11.5 * Math.log10(Math.max(metabolicW, 50));
+}
+
+function heatMultiplier(temp) {
+  // 관리자 대시보드 기준 (admin_dashboard)
+  if (temp >= 34) return 1.20;
+  if (temp >= 31) return 1.12;
+  if (temp >= 28) return 1.05;
+  return 1.00;
+}
+
+// ── 날씨 자동 연동 (OpenWeatherMap 무료 API) ──────────────────
+ 
+const OWM_KEY = '';  
+let weatherRefreshInterval = null;
+
+async function fetchWeatherAuto() {
+  const btn = document.getElementById('btn-weather');
+  if(!btn) return;
+  btn.textContent = '⏳ 불러오는 중…';
+  btn.disabled = true;
+
+  // 위치 가져오기
+  if(!navigator.geolocation) {
+    btn.textContent = '🌡️ 자동'; btn.disabled = false;
+    alert('위치 서비스가 필요합니다.'); return;
+  }
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const {latitude:lat, longitude:lng} = pos.coords;
+    try {
+      // Open-Meteo API  
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m&timezone=Asia%2FSeoul`;
+      const res  = await fetch(url);
+      const data = await res.json();
+      const temp = data.current.temperature_2m;
+      const hum  = data.current.relative_humidity_2m;
+
+      // 입력창에 반영
+      document.getElementById('inp-temp').value = Math.round(temp);
+      document.getElementById('inp-hum').value  = Math.round(hum);
+      updateHeat();
+
+      btn.textContent = `🌡️ ${Math.round(temp)}°C`;
+      btn.style.background = temp >= 34 ? '#fee2e2' : temp >= 31 ? '#ffedd5' : temp >= 28 ? '#fef9c3' : '#dcfce7';
+      btn.disabled = false;
+
+      // 10분마다 자동 갱신
+      if(weatherRefreshInterval) clearInterval(weatherRefreshInterval);
+      weatherRefreshInterval = setInterval(fetchWeatherAuto, 10*60*1000);
+
+    } catch(e) {
+      btn.textContent = '🌡️ 자동'; btn.disabled = false;
+      alert('날씨 데이터를 불러오지 못했습니다.');
+    }
+  }, () => {
+    btn.textContent = '🌡️ 자동'; btn.disabled = false;
+    alert('위치 권한을 허용해주세요.');
+  }, {enableHighAccuracy:false, timeout:8000});
+}
+
+function updateHeat() {
+  const temp = parseFloat(document.getElementById('inp-temp')?.value) || 25;
+  const hum  = parseFloat(document.getElementById('inp-hum')?.value)  || 60;
+  const wbgt = approxWBGT(temp, hum, 'full_sun');
+  const rel  = nioshREL(300); // 배달 중강도 ~300W
+  const mul  = heatMultiplier(temp);
+  const delta = wbgt - rel;
+
+  let risk, label;
+  if      (delta < -3) { risk='ok';       label='✅ 열환경 안전'; }
+  else if (delta <  0) { risk='warn';     label='⚠️ NIOSH REL 근접'; }
+  else if (delta <  3) { risk='danger';   label='🌡️ NIOSH REL 초과'; }
+  else                 { risk='critical'; label='🚨 열환경 위험'; }
+
+  heatState = { temp, hum, wbgt, multiplier: mul, risk };
+
+  const bar = document.getElementById('heat-bar');
+  if (bar) {
+    bar.className = 'heat-bar ' + risk;
+    bar.style.display = '';
+    document.getElementById('hb-label').textContent =
+      label + (mul > 1 ? ` (에너지 ×${mul.toFixed(2)})` : '');
+    document.getElementById('hb-wbgt').textContent =
+      `WBGT≈${wbgt.toFixed(1)}°C / REL ${rel.toFixed(1)}°C`;
+  }
+
+  // 버블마커 & 상세패널 업데이트
+  rebuildBubbles();
+  // 지역 마커도 heat 보정 반영
+  buildRegionMarkers();
+  if(map.getZoom()>=Z_REGION && map.getZoom()<Z_BUBBLE){
+    regionMarkers.forEach(m=>m.setMap(map));
+  }
+  // 최적순서 카드도 온도 보정 반영
+  if(currentTab === 'optimize') renderCompare();
+
+  // 오늘 계산 뷰도 자동 갱신
+  if(eTabMode === 'calc') {
+    DATA.forEach((d, i) => {
+      const n = todayBoxes[i] || 0;
+      const el = document.getElementById('calc-kcal-'+i);
+      if(!el) return;
+      if(n > 0) {
+        const kcal = calcBuildingEnergy(d, n) * heatState.multiplier;
+        el.textContent = kcal.toFixed(1)+' kcal';
+        el.style.color = eColor(kcal);
+      }
+    });
+    updateCalcTotal();
+  }
+}
+
+function heatKcal(baseKcal) {
+  return baseKcal * heatState.multiplier;
+}
+
+// ── 건물 데이터 ──────────────────────────────────────────── 
+const DATA=[
+  {building:"백년관",      lat:37.337331,lng:127.265474,mean_kcal:43.30,p10_kcal:35.28,p90_kcal:51.15,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:11,has_elevator:true},
+  {building:"어문학관",    lat:37.338494,lng:127.273818,mean_kcal:41.00,p10_kcal:27.06,p90_kcal:55.20,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:5, has_elevator:false},
+  {building:"공학관",      lat:37.337721,lng:127.267763,mean_kcal:31.12,p10_kcal:15.60,p90_kcal:45.53,risk:"HIGH",  delivery_mode:"mixed",          max_floor:5, has_elevator:false},
+  {building:"기숙사_D동",  lat:37.333698,lng:127.262573,mean_kcal:19.13,p10_kcal:15.46,p90_kcal:23.14,risk:"MEDIUM",delivery_mode:"storage",         max_floor:4, has_elevator:false},
+  {building:"기숙사_E동",  lat:37.333157,lng:127.261437,mean_kcal:19.13,p10_kcal:15.57,p90_kcal:22.78,risk:"MEDIUM",delivery_mode:"storage",         max_floor:4, has_elevator:false},
+  {building:"기숙사_A동",  lat:37.334453,lng:127.262710,mean_kcal:19.06,p10_kcal:15.34,p90_kcal:23.04,risk:"MEDIUM",delivery_mode:"storage",         max_floor:8, has_elevator:true},
+  {building:"기숙사_C동",  lat:37.335178,lng:127.263631,mean_kcal:19.03,p10_kcal:15.42,p90_kcal:22.88,risk:"MEDIUM",delivery_mode:"storage",         max_floor:8, has_elevator:true},
+  {building:"기숙사_B동",  lat:37.335130,lng:127.262692,mean_kcal:18.92,p10_kcal:15.25,p90_kcal:22.87,risk:"MEDIUM",delivery_mode:"storage",         max_floor:8, has_elevator:true},
+  {building:"자연과학관",  lat:37.338880,lng:127.266147,mean_kcal:13.59,p10_kcal:9.42, p90_kcal:18.03,risk:"MEDIUM",delivery_mode:"floor_delivery",max_floor:5, has_elevator:true},
+  {building:"학생회관",    lat:37.337189,lng:127.269769,mean_kcal:4.93, p10_kcal:2.75, p90_kcal:6.81, risk:"LOW",   delivery_mode:"storage",         max_floor:4, has_elevator:false},
+  {building:"인문경상관",  lat:37.339748,lng:127.274560,mean_kcal:4.92, p10_kcal:2.52, p90_kcal:6.85, risk:"LOW",   delivery_mode:"storage",         max_floor:4, has_elevator:false},
+  {building:"창업보육센터",lat:37.339062,lng:127.267414,mean_kcal:4.92, p10_kcal:3.55, p90_kcal:6.78, risk:"LOW",   delivery_mode:"storage",         max_floor:4, has_elevator:false},
+  {building:"교양관",      lat:37.339740,lng:127.272058,mean_kcal:4.90, p10_kcal:2.49, p90_kcal:6.78, risk:"LOW",   delivery_mode:"storage",         max_floor:5, has_elevator:true},
+  {building:"후생복지관",  lat:37.337753,lng:127.268621,mean_kcal:4.89, p10_kcal:2.59, p90_kcal:6.72, risk:"LOW",   delivery_mode:"storage",         max_floor:4, has_elevator:false},
+   
+  {building:"성안원룸",    lat:37.33653821089142, lng:127.25402029681628, mean_kcal:198.6,p10_kcal:158.9,p90_kcal:238.3,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:3, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리 513-10",       route_no:"410C02"},
+  {building:"왕산오피스텔",lat:37.33643445400855, lng:127.25408483250418, mean_kcal:47.4,p10_kcal:37.9,p90_kcal:56.8,risk:"MEDIUM",  delivery_mode:"floor_delivery",max_floor:3, has_elevator:false, off_campus:true, addr:"처인구 모현읍 백옥대로 2402번길 41",  route_no:"410C02"},
+  {building:"그린빌",      lat:37.33653193756294, lng:127.25379458811287, mean_kcal:99.4,p10_kcal:79.5,p90_kcal:119.3,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리 513-31",       route_no:"410C02"},
+  {building:"로즈빌",      lat:37.33663992102694, lng:127.25385983670296, mean_kcal:76.2,p10_kcal:61.0,p90_kcal:91.5,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:3, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리 513-25",       route_no:"410C02"},
+  {building:"애버빌",      lat:37.33656171073995, lng:127.25356617952318, mean_kcal:87.6,p10_kcal:70.0,p90_kcal:105.1,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 백옥대로 2402번길 35-2",route_no:"410C02"},
+  {building:"쉐르빌",      lat:37.33630987841958, lng:127.25440319564737, mean_kcal:59.5,p10_kcal:47.6,p90_kcal:71.4,risk:"MEDIUM",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 백옥대로 2402번길 43-1",route_no:"410C02"},
+  {building:"동일빌딩",    lat:37.335486697208594,lng:127.25381646092356, mean_kcal:49.8,p10_kcal:39.9,p90_kcal:59.8,risk:"MEDIUM",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리 497-5",        route_no:"410B01"},
+  {building:"동일하이빌",  lat:37.33545712946665, lng:127.25394895099886, mean_kcal:25.6,p10_kcal:20.5,p90_kcal:30.8,risk:"MEDIUM",   delivery_mode:"floor_delivery",max_floor:2, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리 497-3",        route_no:"410B01"},
+  {building:"스위첸KCC 101동",lat:37.33428691330295,lng:127.25447536162122,mean_kcal:110.2,p10_kcal:88.2,p90_kcal:132.2,risk:"HIGH",  delivery_mode:"floor_delivery",max_floor:17,has_elevator:true,  off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (101동)",route_no:"410B01"},
+   
+  {building:"스위첸KCC 102동",lat:37.33437797337788,lng:127.25402994856138,mean_kcal:128.9,p10_kcal:103.1,p90_kcal:154.7,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:17,has_elevator:true, off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (102동)"},
+  {building:"스위첸KCC 103동",lat:37.33447801177215,lng:127.25359866969326,mean_kcal:203.1,p10_kcal:162.4,p90_kcal:243.7,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:17,has_elevator:true, off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (103동)"},
+  {building:"스위첸KCC 104동",lat:37.33503617994105,lng:127.25381776611069,mean_kcal:100.9,p10_kcal:80.7,p90_kcal:121.1,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:17,has_elevator:true, off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (104동)"},
+  {building:"스위첸KCC 105동",lat:37.33488208546163,lng:127.25424604464995,mean_kcal:150.5,p10_kcal:120.4,p90_kcal:180.6,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:17,has_elevator:true, off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (105동)"},
+  {building:"스위첸KCC 106동",lat:37.334827089758654,lng:127.25468029805849,mean_kcal:121.9,p10_kcal:97.5,p90_kcal:146.3,risk:"HIGH",delivery_mode:"floor_delivery",max_floor:17,has_elevator:true, off_campus:true, addr:"처인구 모현읍 외대로 54번길 12 (106동)"},
+  {building:"훕스테이",    lat:37.33540269258001, lng:127.25412367299208, mean_kcal:12.4,p10_kcal:9.9,p90_kcal:14.9,risk:"LOW",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리"},
+  {building:"하우스블라썸",lat:37.33538269258001, lng:127.25417367299208, mean_kcal:9.6,p10_kcal:7.7,p90_kcal:11.5,risk:"LOW",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, addr:"처인구 모현읍 왕산리"},
+  {building:"하나파크빌",  lat:37.33621932712783, lng:127.25461165039556, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"파인빌",      lat:37.336375572433724,lng:127.25423133078817, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"화전빌라",    lat:37.33661161752448, lng:127.25340272361913, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"이츠빌리지",  lat:37.33687668747736, lng:127.25374496811972, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"힐링타운빌",  lat:37.3368018810116,  lng:127.25396476265078, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"노블레스빌",  lat:37.33675832358878, lng:127.253267803508,   mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+  {building:"몬테왕",      lat:37.336663929850104,lng:127.25421819715882, mean_kcal:0,p10_kcal:0,p90_kcal:0,risk:"NONE",delivery_mode:"floor_delivery",max_floor:4, has_elevator:false, off_campus:true, no_delivery:true, addr:"처인구 모현읍 왕산리"},
+];
+
+const DELIVERY_STATUS={
+  "후생복지관":   {status:"wait",count:3,items:["도서 1","택배 2"]},
+  "학생회관":     {status:"wait",count:2,items:["택배 2"]},
+  "창업보육센터": {status:"wait",count:1,items:["서류 1"]},
+  "교양관":       {status:"wait",count:4,items:["택배 4"]},
+  "인문경상관":   {status:"wait",count:2,items:["책 1","택배 1"]},
+  "자연과학관":   {status:"wait",count:3,items:["실험기자재 3"]},
+  "기숙사_A동":   {status:"wait",count:5,items:["택배 5"]},
+  "기숙사_B동":   {status:"wait",count:3,items:["택배 3"]},
+  "기숙사_C동":   {status:"wait",count:4,items:["택배 4"]},
+  "기숙사_D동":   {status:"wait",count:2,items:["택배 2"]},
+  "기숙사_E동":   {status:"wait",count:6,items:["택배 6"]},
+  "공학관":       {status:"wait",count:2,items:["택배 2"]},
+  "백년관":       {status:"wait",count:3,items:["택배 3"]},
+  "어문학관":     {status:"wait",count:1,items:["서류 1"]},
+  // 학교 밖 (왕산리 자취촌 + 외대로) — 410C02 · 410B01 실배송 건물 (배송정보 xlsx 기준)
+  "성안원룸":     {status:"wait",count:8,items:["택배 8"]},
+  "왕산오피스텔": {status:"wait",count:4,items:["택배 4"]},
+  "그린빌":       {status:"wait",count:3,items:["택배 3"]},
+  "로즈빌":       {status:"wait",count:3,items:["택배 3"]},
+  "애버빌":       {status:"wait",count:2,items:["택배 2"]},
+  "쉐르빌":       {status:"wait",count:2,items:["택배 2"]},
+  "훕스테이":     {status:"wait",count:2,items:["택배 2"]},
+  "하우스블라썸": {status:"wait",count:1,items:["택배 1"]},
+  "동일빌딩":     {status:"wait",count:1,items:["택배 1"]},
+  "동일하이빌":   {status:"wait",count:1,items:["택배 1"]},
+  "스위첸KCC 101동":{status:"wait",count:5,items:["택배 5"]},
+  "스위첸KCC 102동":{status:"wait",count:8,items:["택배 8"]},
+  "스위첸KCC 103동":{status:"wait",count:12,items:["택배 12"]},
+  "스위첸KCC 104동":{status:"wait",count:5,items:["택배 5"]},
+  "스위첸KCC 105동":{status:"wait",count:10,items:["택배 10"]},
+  "스위첸KCC 106동":{status:"wait",count:6,items:["택배 6"]},
+};
+
+const STATUS_KR={complete:"배송완료",wait:"배송대기"};
+const STATUS_COL={complete:"#16a34a",wait:"#dc2626"};
+const STATUS_BG={complete:"#dcfce7",wait:"#fee2e2"};
+const MODE_KR={storage:"보관소집중",floor_delivery:"층별직접배송",mixed:"혼합"};
+const maxKcal=Math.max(...DATA.map(d=>d.mean_kcal));
+
+ 
+function eColor(kcal){
+  const r=kcal/maxKcal;
+  if(r<0.15)return'#22c55e';if(r<0.30)return'#84cc16';
+  if(r<0.50)return'#f59e0b';if(r<0.70)return'#f97316';
+  if(r<0.85)return'#ef4444';return'#b91c1c';
+}
+function haversine(lat1,lng1,lat2,lng2){
+  const R=6371000,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function fmtDist(m){return m<1000?Math.round(m)+'m':(m/1000).toFixed(1)+'km';}
+
+ 
+const COUPANG_ORDER_NAMES = [
+  '기숙사_E동','기숙사_D동','기숙사_A동','기숙사_B동','기숙사_C동',
+  '학생회관','어문학관','인문경상관','교양관','후생복지관',
+  '공학관','창업보육센터','자연과학관','백년관',
+  
+  '왕산오피스텔','쉐르빌','애버빌','성안원룸','로즈빌','그린빌',
+  '동일하이빌','동일빌딩','훕스테이','하우스블라썸',
+  '스위첸KCC 101동','스위첸KCC 102동','스위첸KCC 103동','스위첸KCC 104동','스위첸KCC 105동','스위첸KCC 106동'
+];
+
+function buildCoupangOrder(fromLat, fromLng) {
+  let totalDist = 0;
+  let cur = {lat: fromLat, lng: fromLng};
+  const result = [];
+  COUPANG_ORDER_NAMES.forEach(name => {
+    const d = DATA.find(x => x.building === name);
+    if(!d) return;
+    const dist = haversine(cur.lat, cur.lng, d.lat, d.lng);
+    totalDist += dist;
+    result.push({...d, distFromPrev: dist, cumDist: totalDist});
+    cur = d;
+  });
+  return enforceSubgroupContiguity(result, fromLat, fromLng);
+}
+ 
+const SUBGROUPS = {
+  "SG_C02_WANGSAN": { name:"왕산리 자취촌", route:"410C02", lat:37.336503, lng:127.253955, buildings:["쉐르빌","왕산오피스텔","성안원룸","그린빌","로즈빌","애버빌"] },
+  "SG_B01_OEDAERO": { name:"외대로 입구", route:"410B01", lat:37.335432, lng:127.254016, buildings:["훕스테이","하우스블라썸","동일빌딩","동일하이빌"] },
+  "SG_B01_SWITCHEN": { name:"스위첸KCC 단지", route:"410B01", lat:37.334648, lng:127.254141, buildings:["스위첸KCC 101동","스위첸KCC 102동","스위첸KCC 103동","스위첸KCC 104동","스위첸KCC 105동","스위첸KCC 106동"] },
+};
+const BLDG_SUBGROUP = {
+  "쉐르빌":"SG_C02_WANGSAN",
+  "왕산오피스텔":"SG_C02_WANGSAN",
+  "성안원룸":"SG_C02_WANGSAN",
+  "그린빌":"SG_C02_WANGSAN",
+  "로즈빌":"SG_C02_WANGSAN",
+  "애버빌":"SG_C02_WANGSAN",
+  "훕스테이":"SG_B01_OEDAERO",
+  "하우스블라썸":"SG_B01_OEDAERO",
+  "동일빌딩":"SG_B01_OEDAERO",
+  "동일하이빌":"SG_B01_OEDAERO",
+  "스위첸KCC 101동":"SG_B01_SWITCHEN",
+  "스위첸KCC 102동":"SG_B01_SWITCHEN",
+  "스위첸KCC 103동":"SG_B01_SWITCHEN",
+  "스위첸KCC 104동":"SG_B01_SWITCHEN",
+  "스위첸KCC 105동":"SG_B01_SWITCHEN",
+  "스위첸KCC 106동":"SG_B01_SWITCHEN",
+};
+function buildingSubgroupOf(name){ return BLDG_SUBGROUP[name] || null; }
+ 
+const _HM_SWITCHEN_RE = /스위첸[\s_·]*(?:kcc)?[\s_·]*(\d{2,3})\s*동/i;
+function _normBldg(name){
+  if(!name) return name;
+  const s=String(name).trim();
+  const m=s.match(_HM_SWITCHEN_RE);
+  if(m) return `스위첸KCC ${m[1]}동`;
+  return s==='에버빌' ? '애버빌' : s;
+} 
+function enforceSubgroupContiguity(order, sLat, sLng){
+  const seen = new Set();
+  const out = [];
+  order.forEach(d=>{
+    const sg = buildingSubgroupOf(d.building);
+    if(!sg){ out.push(d); return; }
+    if(seen.has(sg)) return;                
+    seen.add(sg);
+    order.forEach(e=>{ if(buildingSubgroupOf(e.building)===sg) out.push(e); });
+  });
+  let pLat=sLat, pLng=sLng, tot=0;
+  return out.map(d=>{
+    const dist=haversine(pLat,pLng,d.lat,d.lng);
+    tot+=dist; pLat=d.lat; pLng=d.lng;
+    return {...d, distFromPrev:dist, cumDist:tot};
+  });
+}
+
+let DELIVERY_TARGETS = DATA.filter(d=>DELIVERY_STATUS[d.building]);
+
+// 알고리즘 1: 에너지 오름차순 (Visentin 2018)
+function calcEnergyOrder(startLat=37.336, startLng=127.260){
+  const sorted=[...DELIVERY_TARGETS].sort((a,b)=>a.mean_kcal-b.mean_kcal);
+  let prevLat=startLat, prevLng=startLng, totalDist=0;
+  const _ord = sorted.map(d=>{
+    const dist=haversine(prevLat,prevLng,d.lat,d.lng);
+    totalDist+=dist;
+    prevLat=d.lat; prevLng=d.lng;
+    return {...d, distFromPrev:dist, cumDist:totalDist};
+  });
+  return enforceSubgroupContiguity(_ord, startLat, startLng);
+}
+
+// 알고리즘 2: 그룹(LOW→MED→HIGH) + 그룹 내 Nearest Neighbor
+function calcGroupOrder(startLat=37.336, startLng=127.260){
+  const groups={LOW:[],MEDIUM:[],HIGH:[]};
+  DELIVERY_TARGETS.forEach(d=>groups[d.risk].push({...d}));
+  const result=[];
+  let curLat=startLat, curLng=startLng, totalDist=0;
+  ['LOW','MEDIUM','HIGH'].forEach(g=>{
+    const pool=[...groups[g]];
+    while(pool.length>0){
+      let bestIdx=0, bestDist=Infinity;
+      pool.forEach((b,i)=>{
+        const d=haversine(curLat,curLng,b.lat,b.lng);
+        if(d<bestDist){bestDist=d;bestIdx=i;}
+      });
+      const chosen=pool.splice(bestIdx,1)[0];
+      totalDist+=bestDist;
+      result.push({...chosen,distFromPrev:bestDist,cumDist:totalDist,group:g});
+      curLat=chosen.lat; curLng=chosen.lng;
+    }
+  });
+  return enforceSubgroupContiguity(result, startLat, startLng);
+}
+
+// 알고리즘 3: 작업강도 균등분배 (Load-Balancing) 
+function calcBalanceOrder(startLat=37.336, startLng=127.260){
+  // 에너지 내림차순/오름차순 두 줄로 나눠 번갈아 뽑기 (high, low, high, low ...)
+  const sorted=[...DELIVERY_TARGETS].sort((a,b)=>b.mean_kcal-a.mean_kcal);
+  const high=sorted.slice(0, Math.ceil(sorted.length/2));       // 무거운 절반
+  const low =sorted.slice(Math.ceil(sorted.length/2)).reverse(); // 가벼운 절반(낮은→높은)
+  const interleaved=[];
+  const n=Math.max(high.length, low.length);
+  for(let i=0;i<n;i++){
+    if(i<high.length) interleaved.push(high[i]);
+    if(i<low.length)  interleaved.push(low[i]);
+  }
+  // 거리 누적 채우기 (calcStats 호환)
+  let prevLat=startLat, prevLng=startLng, totalDist=0;
+  const _ord = interleaved.map(d=>{
+    const dist=haversine(prevLat,prevLng,d.lat,d.lng);
+    totalDist+=dist;
+    prevLat=d.lat; prevLng=d.lng;
+    return {...d, distFromPrev:dist, cumDist:totalDist};
+  });
+  return enforceSubgroupContiguity(_ord, startLat, startLng);
+}
+
+let startLat=37.336, startLng=127.260;
+let energyOrder=calcEnergyOrder(startLat,startLng);
+let groupOrder=calcGroupOrder(startLat,startLng);
+let balanceOrder=calcBalanceOrder(startLat,startLng);
+let coupangOrder=[];
+
+// 순서 맵 (팝업에서 표시용)
+function buildRankMap(order){
+  const m={};order.forEach((d,i)=>m[d.building]=i+1);return m;
+}
+let energyRankMap=buildRankMap(energyOrder);
+let groupRankMap=buildRankMap(groupOrder);
+
+// ── 지도 ─────────────────────────────────────────────────────
+const map=new naver.maps.Map('map',{center:new naver.maps.LatLng(37.3370,127.2640),zoom:15,mapTypeId:naver.maps.MapTypeId.NORMAL});
+let showHeat=true,showBubble=true,showRouteE=false,showRouteG=false;
+let currentTab='energy', statusFilter='all', optMode='energy';
+let datasetLoaded=false;   // true once a company+date dataset is applied
+
+// 히트맵 원 (데이터셋 로드 시 실제 무게 반영해 재생성)
+let heatCircles=[];
+function buildHeatCircles(){
+  heatCircles.forEach(c=>c.setMap(null));
+  heatCircles=[];
+  const liveMax=Math.max(...DATA.map(d=>liveBuildingKcal(d)))||1;
+  DATA.forEach(d=>{
+    if(d.no_delivery) return;   // 배송 없는 건물은 히트맵 원 생략
+    const v=liveBuildingKcal(d);
+    const col=eColor(heatKcal(v)),op=0.08+(v/liveMax)*0.30,r=80+(v/liveMax)*260;
+    [r,r*0.45].forEach(radius=>{
+      const _zb=(typeof Z_BUBBLE!=='undefined')?Z_BUBBLE:18;
+      const c=new naver.maps.Circle({map: showHeat&&map.getZoom()<_zb?map:null,center:new naver.maps.LatLng(d.lat,d.lng),radius,fillColor:col,fillOpacity:op,strokeWeight:0});
+      heatCircles.push(c);
+    });
+  });
+}
+buildHeatCircles();
+
+// 지역 집계 마커
+const REGIONS=[
+  {name:"기숙사단지",keys:["기숙사_A동","기숙사_B동","기숙사_C동","기숙사_D동","기숙사_E동"],lat:37.334300,lng:127.262600},
+  {name:"학술구역",keys:["백년관","공학관","자연과학관","학생회관","후생복지관","창업보육센터"],lat:37.337800,lng:127.267500},
+  {name:"인문/어문",keys:["어문학관","교양관","인문경상관"],lat:37.339200,lng:127.273100},
+  {name:"왕산리 자취촌",keys:["성안원룸","왕산오피스텔","그린빌","로즈빌","애버빌","쉐르빌","동일빌딩","동일하이빌","스위첸KCC 101동","스위첸KCC 102동","스위첸KCC 103동","스위첸KCC 104동","스위첸KCC 105동","스위첸KCC 106동","훕스테이","하우스블라썸","하나파크빌","파인빌","화전빌라","이츠빌리지","힐링타운빌","노블레스빌","몬테왕"],lat:37.335800,lng:127.254000}
+];
+const regionMarkers=[];
+function buildRegionMarkers(){
+  regionMarkers.forEach(m=>m.setMap(null));
+  regionMarkers.length=0;
+  REGIONS.forEach(r=>{
+  const items=DATA.filter(d=>r.keys.includes(d.building));
+  const total=items.reduce((s,d)=>s+heatKcal(liveBuildingKcal(d)),0);
+  const col=eColor(total/items.length);
+  const html=`<div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;transform:translate(-50%,-50%)"><div style="width:66px;height:66px;border-radius:50%;background:${col};opacity:.88;border:3px solid #fff;box-shadow:0 2px 12px ${col}66;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><div style="font-size:9px;font-weight:700;color:#fff;line-height:1.3">${r.name}</div><div style="font-size:12px;font-weight:900;color:#fff">${total.toFixed(0)}</div><div style="font-size:8px;color:rgba(255,255,255,.85)">${heatState.multiplier>1?"🌡️×"+heatState.multiplier.toFixed(2):"kcal"}</div></div></div>`;
+  const m=new naver.maps.Marker({position:new naver.maps.LatLng(r.lat,r.lng),icon:{content:html,anchor:new naver.maps.Point(33,33)}});
+  naver.maps.Event.addListener(m,'click',()=>{map.setCenter(new naver.maps.LatLng(r.lat,r.lng));map.setZoom(16);});
+  regionMarkers.push(m);
+});
+}
+buildRegionMarkers();
+
+// 버블 마커
+const bubbleMarkers=[];
+function rebuildBubbles(){
+  bubbleMarkers.forEach(m=>m.setMap(null));
+  bubbleMarkers.length=0;
+  buildBubbles();
+  if(map.getZoom()>=Z_BUBBLE && showBubble){
+    bubbleMarkers.forEach(m=>m.setMap(map));
+  }
+}
+function buildBubbles(){
+DATA.forEach((d,i)=>{
+  // ── 배송 데이터 없는 건물(좌표만) → 회색 마커 ──
+  if(d.no_delivery){
+    const ghtml = `
+    <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;transform:translate(-50%,-100%);opacity:.85">
+      <div style="position:relative;background:#f3f4f6;border:1.5px dashed #9ca3af;border-radius:8px;padding:3px 8px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.1)">
+        <div style="font-size:9px;font-weight:700;color:#6b7280">${d.building}</div>
+        <div style="font-size:8px;color:#9ca3af;margin-top:1px">배송 없음</div>
+        <div style="position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #9ca3af"></div>
+      </div>
+      <div style="width:4px;height:4px;border-radius:50%;background:#9ca3af;margin-top:2px"></div>
+    </div>`;
+    const gm = new naver.maps.Marker({
+      position: new naver.maps.LatLng(d.lat, d.lng),
+      map: null,
+      icon: { content: ghtml, anchor: new naver.maps.Point(40, 40) }
+    });
+    naver.maps.Event.addListener(gm, 'click', ()=>openDetail(d,i));
+    bubbleMarkers.push(gm);
+    return;
+  }
+  const hk = heatKcal(liveBuildingKcal(d));    
+  const col = eColor(hk);
+  const st  = DELIVERY_STATUS[d.building];
+
+  // 배송 상태별 핀 색상 (쿠팡플렉스 스타일)
+  const pinCol  = st ? STATUS_COL[st.status]  : col;
+  const pinBg   = st ? STATUS_BG[st.status]   : '#fff';
+  const stLabel = st ? STATUS_KR[st.status]   : '';
+  const boxCount = st ? st.count : 0;
+
+  // 박스 수 뱃지
+  const boxBadge = boxCount > 0
+    ? `<div style="position:absolute;top:-8px;right:-8px;background:${pinCol};color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2)">${boxCount}</div>`
+    : '';
+
+ 
+  const html = `
+  <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;transform:translate(-50%,-100%)">
+    <div style="position:relative;background:${pinBg};border:2px solid ${pinCol};border-radius:9px;padding:4px 9px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.15)">
+      ${boxBadge}
+      <div style="font-size:9px;font-weight:800;color:${pinCol};margin-bottom:2px">${d.building}</div>
+      <div style="font-size:10px;font-weight:700;color:#111;font-family:monospace">${(d.p10_kcal*(liveBuildingKcal(d)/(d.mean_kcal||1))).toFixed(1)}<span style="color:#aaa;font-size:8px">~</span>${hk.toFixed(1)}<span style="color:#aaa;font-size:8px">kcal</span></div>
+      ${st ? `<div style="font-size:8px;font-weight:700;color:${pinCol};margin-top:1px">${stLabel} · 📦${boxCount}박스</div>` : ''}
+      <div style="position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid ${pinCol}"></div>
+    </div>
+    <div style="width:5px;height:5px;border-radius:50%;background:${pinCol};margin-top:2px"></div>
+  </div>`;
+
+  const m = new naver.maps.Marker({
+    position: new naver.maps.LatLng(d.lat, d.lng),
+    map: null,   
+    icon: { content: html, anchor: new naver.maps.Point(50, 48) }
+  });
+  naver.maps.Event.addListener(m, 'click', ()=>openDetail(d,i));
+  bubbleMarkers.push(m);
+});
+} // end buildBubbles
+buildBubbles();
+
+// 배송상태 마커
+const statusMarkers=[];
+DATA.forEach((d,i)=>{
+  const st=DELIVERY_STATUS[d.building];
+  if(!st)return;
+  const col=STATUS_COL[st.status];
+  const html=`<div style="background:${col};color:#fff;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);cursor:pointer">${st.count}</div>`;
+  const m=new naver.maps.Marker({position:new naver.maps.LatLng(d.lat,d.lng+0.0003),map:null,icon:{content:html,anchor:new naver.maps.Point(8,8)}});
+  naver.maps.Event.addListener(m,'click',()=>openDetail(d,i));
+  statusMarkers.push({marker:m,building:d.building,status:st.status});
+});
+
+// 경로 폴리라인 + 순서 마커
+let routePolyE=null, routePolyG=null;
+const routeMarkersE=[], routeMarkersG=[];
+let roadPolyE=null, roadPolyG=null, roadPolyC=null;
+let roadMode=false;
+
+// 직선 경로 (점선으로 구분)
+function drawRoute(order, color, markerArr, polyRef){
+  if(polyRef) polyRef.setMap(null);
+  markerArr.forEach(m=>m.setMap(null));
+  markerArr.length=0;
+  const path=order.map(d=>new naver.maps.LatLng(d.lat,d.lng));
+  const poly=new naver.maps.Polyline({map:null,path,strokeColor:color,strokeWeight:3,strokeOpacity:.5,strokeStyle:'dash'});
+  order.forEach((d,i)=>{
+    const html=`<div style="background:${color};color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,.3);cursor:pointer">${i+1}</div>`;
+    const idx=DATA.findIndex(x=>x.building===d.building);
+    const m=new naver.maps.Marker({position:new naver.maps.LatLng(d.lat,d.lng-0.0003),map:null,icon:{content:html,anchor:new naver.maps.Point(10,10)}});
+    naver.maps.Event.addListener(m,'click',()=>openDetail(d,idx));
+    markerArr.push(m);
+  });
+  return poly;
+}
+try {
+  routePolyE=drawRoute(energyOrder,'#f59e0b',routeMarkersE,null);
+  routePolyG=drawRoute(groupOrder,'#0284c7',routeMarkersG,null);
+} catch(e) { console.error('initial drawRoute failed:', e); }
+// 초기에 두 경로 자동 활성화
+showRouteE=true; showRouteG=true;
+const _be=document.getElementById('btn-route-e');
+const _bg=document.getElementById('btn-route-g');
+if(_be) _be.className='tbtn on-energy';
+if(_bg) _bg.className='tbtn on-group';
+ 
+const routeMarkersB=[], routeMarkersC=[];
+let routePolyB=null, routePolyC=null;
+function rebuildAllRoutePolylines(){
+  routePolyE && routePolyE.setMap(null);
+  routePolyG && routePolyG.setMap(null);
+  routePolyB && routePolyB.setMap(null);
+  routePolyC && routePolyC.setMap(null);
+  routePolyE = drawRoute(energyOrder,  '#f59e0b', routeMarkersE, null);
+  routePolyG = drawRoute(groupOrder,   '#0284c7', routeMarkersG, null);
+  routePolyB = drawRoute(balanceOrder, '#7c3aed', routeMarkersB, null);
+  if (coupangOrder && coupangOrder.length) {
+    routePolyC = drawRoute(coupangOrder, '#6b7280', routeMarkersC, null);
+  }
+}
+ 
+function drawAllRouteStyling(){ applyRouteVisibility && applyRouteVisibility(); } 
+try { rebuildAllRoutePolylines(); } catch(e) { console.error('rebuildAllRoutePolylines failed:', e); }
+
+// ── OSRM 차량 도로 경로 ────────────────────────────────────────
+async function fetchRoadPath(order){
+  const coords=order.map(d=>`${d.lng},${d.lat}`).join(';');
+  const url=`https://router.project-osrm.org/route/v1/car/${coords}?overview=full&geometries=geojson`;
+  try{
+    const res=await fetch(url);
+    const data=await res.json();
+    if(data.code!=='Ok'||!data.routes[0]) throw new Error('경로없음');
+    const path=data.routes[0].geometry.coordinates.map(([lng,lat])=>new naver.maps.LatLng(lat,lng));
+    return {path, dist:data.routes[0].distance, dur:data.routes[0].duration};
+  }catch(e){ console.warn('OSRM 실패(직선 유지):',e); return null; }
+}
+
+function setRoadBtnState(loading){
+  const btn=document.getElementById('btn-road');
+  if(!btn)return;
+  btn.disabled=!!loading;
+  if(loading){btn.textContent='⏳ 경로 불러오는 중…';btn.className='tbtn';}
+  else{btn.textContent=roadMode?'🛣️ 도로경로 ON':'🛣️ 도로경로';btn.className='tbtn'+(roadMode?' on':'');}
+}
+
+async function toggleRoadMode(){
+  roadMode=!roadMode;
+  setRoadBtnState(true);
+  if(roadPolyE){roadPolyE.setMap(null);roadPolyE=null;}
+  if(roadPolyG){roadPolyG.setMap(null);roadPolyG=null;}
+  if(roadMode){
+    const [resE,resG]=await Promise.all([fetchRoadPath(energyOrder),fetchRoadPath(groupOrder)]);
+    const z=map.getZoom();
+    if(resE){
+      roadPolyE=new naver.maps.Polyline({map:showRouteE&&z>=Z_BUBBLE?map:null,path:resE.path,strokeColor:'#f59e0b',strokeWeight:4,strokeOpacity:.9});
+      routePolyE&&routePolyE.setMap(null);
+      const el=document.getElementById('route-stat-E');
+      if(el) el.textContent=`🛣️ ${(resE.dist/1000).toFixed(2)}km · 차량 ${Math.round(resE.dur/60)}분`;
+    }
+    if(resG){
+      roadPolyG=new naver.maps.Polyline({map:showRouteG&&z>=Z_BUBBLE?map:null,path:resG.path,strokeColor:'#0284c7',strokeWeight:4,strokeOpacity:.9});
+      routePolyG&&routePolyG.setMap(null);
+      const el=document.getElementById('route-stat-G');
+      if(el) el.textContent=`🛣️ ${(resG.dist/1000).toFixed(2)}km · 차량 ${Math.round(resG.dur/60)}분`;
+    }
+  } else {
+    const z=map.getZoom();
+    if(showRouteE&&z>=Z_BUBBLE) routePolyE&&routePolyE.setMap(map);
+    if(showRouteG&&z>=Z_BUBBLE) routePolyG&&routePolyG.setMap(map);
+    renderCompare();
+  }
+  setRoadBtnState(false);
+}
+ 
+const SIM = {
+  W:          72,      
+  MET_WALK:   3.2,     // 평지 걷기 (localInf 기준, Compendium 2011)
+  MET_UP:     6.8,     // 계단 오르기
+  MET_DOWN:   3.5,     // 계단 내리기
+  MET_ELEV:   0.911,   // 엘리베이터/대기
+  MET_IDLE:   0.911,   // 서비스 대기
+  STAIR_UP:   18,      // 층당 계단 오르기 (초)
+  STAIR_DOWN: 13,      // 층당 계단 내리기 (초)
+  ELEV_FROM:  3,       // 엘리베이터 사용 시작 층
+  ELEV_WAIT:  37.5,    // 엘리베이터 대기 평균 (15~60 → 37.5초)
+  ELEV_MOVE:  4.0,     // 층당 이동 시간 평균 (3~5 → 4초)
+  ELEV_DOOR:  6,       // 문 열림 시간 (초)
+  MAX_CARRY:  15.0,    // 최대 운반 무게 (kg)
+  SVC_PER_PKG:5,       // 박스당 서비스 시간 (초)
+  
+  HALLWAY: { storage_lobby:7.5, elevator_front:5.0, room_direct:17.5 },
+ 
+  APPROACH: {
+    '공학관':15,'백년관':15,'어문학관':15,'자연과학관':15,
+    '기숙사_A동':20,'기숙사_B동':20,'기숙사_C동':20,
+    '기숙사_D동':20,'기숙사_E동':20,
+    '교양관':15,'인문경상관':15,'학생회관':15,'후생복지관':15,'창업보육센터':15
+  },
+  
+  HALLWAY_TYPE: {
+    '공학관':'room_direct','백년관':'room_direct','어문학관':'room_direct',
+    '자연과학관':'elevator_front',
+    '기숙사_A동':'storage_lobby','기숙사_B동':'storage_lobby','기숙사_C동':'storage_lobby',
+    '기숙사_D동':'storage_lobby','기숙사_E동':'storage_lobby',
+    '교양관':'storage_lobby','인문경상관':'storage_lobby',
+    '학생회관':'storage_lobby','후생복지관':'storage_lobby','창업보육센터':'storage_lobby'
+  }
+};
+ 
+function calcBuildingTime(d, nBoxes) {
+  if(!nBoxes || nBoxes <= 0) nBoxes = Math.round((
+    {'공학관':7,'백년관':17,'어문학관':7,'자연과학관':7,
+     '기숙사_A동':27,'기숙사_B동':27,'기숙사_C동':27,
+     '기숙사_D동':27,'기숙사_E동':27,
+     '교양관':7,'인문경상관':7,'학생회관':7,
+     '후생복지관':7,'창업보육센터':7}[d.building] || 7));
+
+  const AVG_PKG   = 3.65;
+  const totalLoad = nBoxes * AVG_PKG;
+  const approachSec = SIM.APPROACH[d.building] || 15;
+  const hallwaySec  = SIM.HALLWAY[SIM.HALLWAY_TYPE[d.building] || 'storage_lobby'];
+  const nTrips = Math.max(1, Math.ceil(totalLoad / SIM.MAX_CARRY));
+
+  let totalSec = approachSec * nTrips; // 접근 시간
+
+  // 층별 배송 시간
+  if(d.delivery_mode === 'storage') {
+    const vt = getVerticalTimes(1, d.has_elevator);
+    for(let t=0; t<nTrips; t++) {
+      totalSec += hallwaySec + vt.upLoaded + vt.downUnloaded + vt.elevLoaded + vt.elevUnloaded;
+    }
+  } else if(d.delivery_mode === 'mixed') {
+    const perFloor = nBoxes / d.max_floor;
+    for(let f=1; f<=d.max_floor; f++) {
+      const vt = getVerticalTimes(f, d.has_elevator);
+      const trips = Math.max(1, Math.ceil(perFloor*AVG_PKG/SIM.MAX_CARRY));
+      totalSec += (hallwaySec + vt.upLoaded + vt.downUnloaded + vt.elevLoaded + vt.elevUnloaded) * trips;
+    }
+  } else {
+    const perFloor = nBoxes / d.max_floor;
+    for(let f=1; f<=d.max_floor; f++) {
+      const vt = getVerticalTimes(f, d.has_elevator);
+      const trips = Math.max(1, Math.ceil(perFloor*AVG_PKG/SIM.MAX_CARRY));
+      totalSec += (hallwaySec + vt.upLoaded + vt.downUnloaded + vt.elevLoaded + vt.elevUnloaded) * trips;
+    }
+  }
+  totalSec += nBoxes * SIM.SVC_PER_PKG; // 서비스 시간
+  return totalSec / 60; // 분 단위 반환
+}
+
+// 경로 전체 서비스 시간 합산 (분)
+function calcTotalServiceTime(order) {
+  return order.reduce((sum, d) => sum + calcBuildingTime(d, 0), 0);
+}
+
+// Python calculate_energy_j() 와 동일
+function calcEJ(met, W, tSec, loadKg=0, carrying=true) {
+  if(tSec <= 0) return 0;
+  const cLoad = (carrying && loadKg > 0) ? 1 + 0.5*(loadKg/W) : 1.0;
+  const mass  = W + (carrying ? loadKg : 0);
+  return met * cLoad * mass * (tSec/3600) * 4184;
+}
+
+// Python get_vertical_movement_times() 와 동일
+function getVerticalTimes(floor, hasElev) {
+  const floors = Math.max(0, floor - 1);
+  if(floor <= 1) return {upLoaded:0, downUnloaded:0, elevLoaded:0, elevUnloaded:0};
+  if(hasElev && floor >= SIM.ELEV_FROM) {
+    return {
+      upLoaded:0, downUnloaded:0,
+      elevLoaded:  SIM.ELEV_WAIT        + floors*SIM.ELEV_MOVE + SIM.ELEV_DOOR,
+      elevUnloaded:SIM.ELEV_WAIT*0.7    + floors*SIM.ELEV_MOVE + SIM.ELEV_DOOR
+    };
+  }
+  return { upLoaded:floors*SIM.STAIR_UP, downUnloaded:floors*SIM.STAIR_DOWN, elevLoaded:0, elevUnloaded:0 };
+}
+
+// 한 층 배치 에너지 (Python estimate_floor_batch_energy)
+function floorBatchE(nPkg, totalLoadKg, floor, hasElev, hallwaySec) {
+  if(nPkg <= 0) return 0;
+  const nTrips = Math.max(1, Math.ceil(totalLoadKg / SIM.MAX_CARRY));
+  const vt = getVerticalTimes(floor, hasElev);
+  let E = 0, rem = totalLoadKg;
+  for(let t = 0; t < nTrips; t++) {
+    const c = Math.min(rem, SIM.MAX_CARRY); rem -= c;
+    E += calcEJ(SIM.MET_WALK, SIM.W, hallwaySec,  c, true);
+    E += calcEJ(SIM.MET_UP,   SIM.W, vt.upLoaded, c, true);
+    E += calcEJ(SIM.MET_DOWN, SIM.W, vt.downUnloaded, 0, false);
+    E += calcEJ(SIM.MET_ELEV, SIM.W, vt.elevLoaded,   c, true);
+    E += calcEJ(SIM.MET_ELEV, SIM.W, vt.elevUnloaded, 0, false);
+  }
+  E += calcEJ(SIM.MET_IDLE, SIM.W, nPkg * SIM.SVC_PER_PKG, 0, false);
+  return E;
+}
+
+// 전체 건물 에너지 계산 (Python 시뮬레이션 기댓값 방식)
+// avgPkgKg: 그 날 실제 박스 평균 무게(kg). 없으면 시뮬 기본값 3.65.
+function calcBuildingEnergy(d, nBoxes, avgPkgKg) {
+  if(!nBoxes || nBoxes <= 0) return 0;
+  const AVG_PKG = (avgPkgKg && avgPkgKg > 0) ? avgPkgKg : 3.65;
+  // 배송 모드에 따라 박스를 층별로 펼친 뒤 공유 모델(pm_buildingPredKcal)로 계산.
+  const boxes = [];
+  const push = (floor, cnt) => { for(let k=0;k<Math.round(cnt);k++) boxes.push({ floor, hasElevator: !!d.has_elevator, pkgWeightKg: AVG_PKG }); };
+  if(d.delivery_mode === 'storage') {
+    push(1, nBoxes);
+  } else if(d.delivery_mode === 'mixed') {
+    const nStore = Math.round(nBoxes * 0.5);
+    const nFlr   = nBoxes - nStore;
+    if(nStore > 0) push(d.storage_floor || 2, nStore);
+    if(nFlr > 0) { const perFloor = nFlr / d.max_floor; for(let f=1; f<=d.max_floor; f++) push(f, perFloor); }
+  } else {
+    const perFloor = nBoxes / d.max_floor;
+    for(let f=1; f<=d.max_floor; f++) push(f, perFloor);
+  }
+  if(!boxes.length) push(d.max_floor || 1, nBoxes);
+  return pm_buildingPredKcal(boxes, pm_bodyW());
+}
+
+// 입력값 저장
+// 오늘 실측 계산 데이터 저장
+// todayFloors[i] = { 1: 3, 3: 2, 7: 1 } (층→박스수)
+const todayFloors = {};
+
+// 건물별 층 데이터에서 에너지 계산 — 공유 모델(pm_buildingPredKcal)로 통일.
+function calcByFloors(d, floorMap) {
+  const AVG_PKG = 3.65;
+  const totalBoxes = Object.values(floorMap).reduce((s,v)=>s+v,0);
+  if(totalBoxes <= 0) return 0;
+  // 층→박스수 맵을 박스 리스트로 펼쳐 공유 모델에 전달
+  const boxes = [];
+  Object.entries(floorMap).forEach(([fl, cnt]) => {
+    const floor = parseInt(fl);
+    for(let k=0;k<cnt;k++) boxes.push({ floor, hasElevator: !!d.has_elevator, pkgWeightKg: AVG_PKG });
+  });
+  return pm_buildingPredKcal(boxes, pm_bodyW());
+}
+
+// 층별 입력 토글
+function toggleFloorGrid(i) {
+  const grid = document.getElementById('fg-'+i);
+  if(!grid) return;
+  const open = grid.classList.toggle('open');
+  const btn  = document.getElementById('ft-'+i);
+  if(btn) btn.textContent = open ? '층별 ▲' : '층별 ▼';
+  if(open) recalcBuilding(i);
+}
+
+// 건물 계산 갱신
+function recalcBuilding(i) {
+  const d = DATA[i];
+  const el = document.getElementById('calc-kcal-'+i);
+  if(!el) return;
+
+  // 층별 입력이 열려있으면 층별 데이터로 계산
+  const grid = document.getElementById('fg-'+i);
+  const useFloor = grid && grid.classList.contains('open');
+
+  let kcal = 0;
+  if(useFloor) {
+    const floorMap = {};
+    let hasAny = false;
+    if(d.delivery_mode === 'storage') {
+      const n = parseInt(document.getElementById('box-'+i)?.value) || 0;
+      if(n > 0) { floorMap[1] = n; hasAny = true; }
+    } else {
+      for(let f=1; f<=d.max_floor; f++) {
+        const v = parseInt(document.getElementById('fi-'+i+'-'+f)?.value) || 0;
+        if(v > 0) { floorMap[f] = v; hasAny = true; }
+      }
+    }
+    if(hasAny) {
+      todayFloors[i] = floorMap;
+      kcal = calcByFloors(d, floorMap) * heatState.multiplier;
+    } else {
+      todayFloors[i] = {};
+    }
+  } else {
+    const n = parseInt(document.getElementById('box-'+i)?.value) || 0;
+    todayFloors[i] = null; // null = 총 박스 수 모드
+    if(n > 0) kcal = calcBuildingEnergy(d, n) * heatState.multiplier;
+  }
+
+  if(kcal > 0) {
+    el.textContent = kcal.toFixed(1)+' kcal';
+    el.style.color = eColor(kcal);
+  } else {
+    el.textContent = '— kcal';
+    el.style.color = '#ccc';
+  }
+  updateCalcTotal();
+  persistManualCalc();   // ← every edit snapshots to localStorage (instant on-device save)
+}
+ 
+function persistManualCalc() {
+  const snapshot = {};
+  DATA.forEach((d, i) => {
+    const tot = parseInt(document.getElementById('box-'+i)?.value) || 0;
+    const byFloor = {};
+    if (d.delivery_mode !== 'storage') {
+      for (let f = 1; f <= d.max_floor; f++) {
+        const v = parseInt(document.getElementById(`fi-${i}-${f}`)?.value) || 0;
+        if (v > 0) byFloor[f] = v;
+      }
+    }
+    const kcalText = document.getElementById('calc-kcal-'+i)?.textContent || '';
+    const kcalMatch = kcalText.match(/([\d.]+)/);
+    if (tot > 0 || Object.keys(byFloor).length > 0) {
+      snapshot[d.building] = {
+        totalBoxes: tot,
+        byFloor:    byFloor,
+        kcal:       kcalMatch ? parseFloat(kcalMatch[1]) : 0
+      };
+    }
+  });
+  try { localStorage.setItem('heatmap_manual_calc', JSON.stringify(snapshot)); }
+  catch(e) {}
+}
+ 
+function restoreManualCalcFromLocal() {
+  try {
+    const snap = JSON.parse(localStorage.getItem('heatmap_manual_calc') || '{}');
+    DATA.forEach((d, i) => {
+      const s = snap[d.building];
+      if (!s) return;
+      const totInp = document.getElementById('box-'+i);
+      if (totInp && !totInp.value && s.totalBoxes > 0) totInp.value = s.totalBoxes;
+      if (s.byFloor) {
+        for (const [f, v] of Object.entries(s.byFloor)) {
+          const fi = document.getElementById(`fi-${i}-${f}`);
+          if (fi && !fi.value) fi.value = v;
+        }
+      }
+      recalcBuilding(i);
+    });
+  } catch(e) {}
+}
+
+function initCalcRows() {
+  const container = document.getElementById('calc-rows');
+  if(!container) return;
+  container.innerHTML = '';
+
+  DATA.forEach((d, i) => {
+    if(d.no_delivery) return;    
+    const col = eColor(d.mean_kcal);
+    const isStorage = d.delivery_mode === 'storage';
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'border-bottom:1px solid #f0f0f0;';
+
+    // 메인 행
+    const mainRow = document.createElement('div');
+    mainRow.className = 'calc-row';
+    mainRow.style.borderBottom = 'none';
+
+    // 층별 버튼 (storage는 의미없으므로 숨김)
+    const floorBtn = isStorage
+      ? ''
+      : `<button class="floor-toggle" id="ft-${i}" onclick="toggleFloorGrid(${i})">층별 ▼</button>`;
+
+    mainRow.innerHTML = `
+      <div class="rdot" style="background:${col};width:8px;height:8px;border-radius:50%;flex-shrink:0"></div>
+      <div class="calc-bldg" title="${d.building}">${d.building}${floorBtn}</div>
+      <input class="calc-input" type="number" id="box-${i}" min="0" max="99" placeholder="0"
+        oninput="recalcBuilding(${i})" value="">
+      <div class="calc-result" id="calc-kcal-${i}" style="color:#ccc">— kcal</div>
+      <div class="calc-range" style="font-size:9px;color:#aaa;min-width:50px;text-align:right">${d.p10_kcal.toFixed(0)}~${d.p90_kcal.toFixed(0)}</div>`;
+
+    // 층별 입력 그리드 (storage 제외)
+    let floorGrid = '';
+    if(!isStorage) {
+      const cells = [];
+      for(let f=1; f<=d.max_floor; f++) {
+        cells.push(`<div class="floor-cell">
+          <label>${f}층</label>
+          <input type="number" id="fi-${i}-${f}" min="0" max="30" placeholder="0"
+            oninput="recalcBuilding(${i})" value="">
+        </div>`);
+      }
+      const fg = document.createElement('div');
+      fg.className = 'floor-grid';
+      fg.id = 'fg-'+i;
+      fg.innerHTML = cells.join('');
+      wrapper.appendChild(mainRow);
+      wrapper.appendChild(fg);
+    } else {
+      wrapper.appendChild(mainRow);
+    }
+
+    container.appendChild(wrapper);
+  });
+}
+
+function updateCalcTotal() {
+  let total = 0, hasAny = false;
+  DATA.forEach((d, i) => {
+    const grid = document.getElementById('fg-'+i);
+    const useFloor = grid && grid.classList.contains('open');
+    let kcal = 0;
+    if(useFloor && todayFloors[i] && Object.keys(todayFloors[i]).length > 0) {
+      kcal = calcByFloors(d, todayFloors[i]) * heatState.multiplier;
+    } else {
+      const n = parseInt(document.getElementById('box-'+i)?.value) || 0;
+      if(n > 0) kcal = calcBuildingEnergy(d, n) * heatState.multiplier;
+    }
+    if(kcal > 0) { total += kcal; hasAny = true; }
+  });
+  const el  = document.getElementById('calc-total');
+  const val = document.getElementById('calc-total-val');
+  if(el && val) {
+    el.style.display = hasAny ? '' : 'none';
+    val.textContent = total.toFixed(1)+' kcal';
+  }
+}
+
+let eTabMode = 'sim';
+function switchETab(mode) {
+  eTabMode = mode;
+  document.getElementById('view-sim').style.display = mode==='sim' ? '' : 'none';
+  document.getElementById('view-calc').style.display = mode==='calc' ? '' : 'none';
+  document.getElementById('etab-sim').className = 'etab-btn'+(mode==='sim'?' on-sim':'');
+  document.getElementById('etab-calc').className = 'etab-btn'+(mode==='calc'?' on-calc':'');
+  if(mode==='calc') initCalcRows();
+}
+ 
+
+function updateZoom(){
+  const z = map.getZoom();
+  const badge = document.getElementById('zoom-badge');
+
+  // 줌아웃 (< Z_BUBBLE)
+  if(z < Z_BUBBLE){
+    // 지역별 마커: Z_REGION 이상이면 표시 (heat 보정 포함)
+    regionMarkers.forEach(m=>m.setMap(z >= Z_REGION ? map : null));
+    bubbleMarkers.forEach(m=>m.setMap(null));
+    statusMarkers.forEach(s=>s.marker.setMap(null));
+    // 개별 히트맵 원 숨김 → 줌아웃 시 지역 합산 원만 깔끔하게 보이도록
+    heatCircles.forEach(c=>c.setMap(null));
+    routePolyE&&routePolyE.setMap(null);
+    routePolyG&&routePolyG.setMap(null);
+    roadPolyE&&roadPolyE.setMap(null);
+    roadPolyG&&roadPolyG.setMap(null);
+    routeMarkersE.forEach(m=>m.setMap(null));
+    routeMarkersG.forEach(m=>m.setMap(null));
+    badge.textContent = z >= Z_REGION ? '🏘️ 지역별 에너지 합산' : '🌏 전체 에너지 분포';
+    badge.style.background='#fff';
+    badge.style.color='#555';
+    badge.style.borderColor='#e0e0e0';
+
+  // 줌인 (>= Z_BUBBLE): 건물 버블 + 경로
+  } else {
+    regionMarkers.forEach(m=>m.setMap(null));
+    bubbleMarkers.forEach(m=>m.setMap(showBubble?map:null));
+    statusMarkers.forEach(s=>s.marker.setMap(showBubble?map:null));
+    // 개별 히트맵 원 복원 (히트맵 토글이 켜져 있을 때만)
+    heatCircles.forEach(c=>c.setMap(showHeat?map:null));
+    // 경로: 켜진 것은 진한 점선, 꺼진 것은 흐린 점선(ghost)으로 항상 표시
+    applyRouteVisibility();
+    badge.textContent='🏢 건물별 예측 에너지';
+    badge.style.background='#fff';
+    badge.style.color='#555';
+    badge.style.borderColor='#e0e0e0';
+  }
+}
+naver.maps.Event.addListener(map,'zoom_changed',()=>{
+  // coupangOrder 초기화 (지도 생성 후)
+coupangOrder = buildCoupangOrder(startLat, startLng);
+updateZoom();
+// DOM 완성 후 renderCompare 실행
+setTimeout(()=>{ renderCompare(); }, 300);
+updateHeat(); // 열환경 초기화
+  // 줌 뱃지 색상 리셋
+  const z=map.getZoom();
+  const badge=document.getElementById('zoom-badge');
+  if(z<Z_ROUTE){badge.style.color='#555';badge.style.borderColor='#e0e0e0';}
+});
+try { updateZoom(); } catch(e) { console.error('initial updateZoom failed:', e); }
+
+// ── 최적화 비교표 렌더 ────────────────── 
+function calcStats(order){
+  // 피로 누적 모델 (Visentin 2018 기반, 누적 지배형)
+  const ALPHA   = 0.30;
+  const RECOVER = 0.65; 
+  const E_MAX  = Math.max(...DATA.map(d=>heatKcal(liveBuildingKcal(d)))) || 1;
+ 
+  const MET_TRAVEL = 2.5;   // 노드 간 이동 MET
+  const WALK_MPM   = 83;    // 도보 속도 약 5km/h = 83 m/min
+
+  let totalKcal   = 0;
+  let travelKcal  = 0;   // 이동 에너지 누적 (별도 추적)
+  let fatigue     = 0;
+  let peakFatigue = 0;
+  let totalMin    = 0;
+  const totalDist = order.reduce((s,d)=>s+d.distFromPrev, 0);
+
+  order.forEach(d => {
+    // ── 노드 간 이동 에너지 (MET 2.5 × 이동시간) ──
+    const moveMin = (d.distFromPrev || 0) / WALK_MPM;
+    const moveKcal = MET_TRAVEL * SIM.W * (moveMin / 60);   
+    travelKcal += moveKcal;
+    totalKcal  += moveKcal;
+ 
+    const baseE = heatKcal(liveBuildingKcal(d));
+ 
+    totalKcal += baseE;
+ 
+    const E_norm = baseE / E_MAX;
+    fatigue = fatigue * RECOVER + E_norm;
+    peakFatigue = Math.max(peakFatigue, fatigue);
+ 
+    const st = DELIVERY_STATUS[d.building];
+    const boxes = st ? st.count : 0;
+    const workMin = boxes>0 ? calcBuildingTime(d, boxes) : 0;
+    totalMin += moveMin + workMin;
+  });
+
+  return { totalDist, totalKcal, travelKcal, peakFatigue, totalMin };
+}
+function renderCompare(){
+  const se=calcStats(energyOrder), sg=calcStats(groupOrder), sb=calcStats(balanceOrder);
+  const isE=optMode==='energy';
+
+  // 카드 통계 업데이트
+  const eKcal=document.getElementById('rc-e-kcal');
+  const gKcal=document.getElementById('rc-g-kcal');
+  const bKcal=document.getElementById('rc-b-kcal');
+  const eDist=document.getElementById('rc-e-dist');
+  const gDist=document.getElementById('rc-g-dist');
+  const bDist=document.getElementById('rc-b-dist');
+  if(eKcal) eKcal.textContent=se.totalKcal.toFixed(0);
+  if(gKcal) gKcal.textContent=sg.totalKcal.toFixed(0);
+  if(bKcal) bKcal.textContent=sb.totalKcal.toFixed(0);
+  // 이동 에너지 표시 (건물 작업 + 노드 간 이동 구분)
+  const eTrvl = document.getElementById('rc-e-travel');
+  const gTrvl = document.getElementById('rc-g-travel');
+  const bTrvl = document.getElementById('rc-b-travel');
+  if(eTrvl) eTrvl.textContent = `이동 ${se.travelKcal.toFixed(0)}kcal + 작업 ${(se.totalKcal-se.travelKcal).toFixed(0)}kcal`;
+  if(gTrvl) gTrvl.textContent = `이동 ${sg.travelKcal.toFixed(0)}kcal + 작업 ${(sg.totalKcal-sg.travelKcal).toFixed(0)}kcal`;
+  if(bTrvl) bTrvl.textContent = `이동 ${sb.travelKcal.toFixed(0)}kcal + 작업 ${(sb.totalKcal-sb.travelKcal).toFixed(0)}kcal`;
+  // 소요시간 포맷: 분 → "32분" 또는 "1시간 12분"
+  function fmtMin(m){
+    const t = Math.round(m);
+    if(t < 60) return `⏱️ ${t}분`;
+    return `⏱️ ${Math.floor(t/60)}시간 ${t%60}분`;
+  }
+  if(eDist) eDist.textContent=fmtMin(se.totalMin);
+  if(gDist) gDist.textContent=fmtMin(sg.totalMin);
+  if(bDist) bDist.textContent=fmtMin(sb.totalMin);
+
+  // 쿠팡 기본 순서 통계 (비교 기준값)
+  const scRef = coupangOrder.length > 0 ? calcStats(coupangOrder) : null;
+  if(scRef) {
+    const cKcal = document.getElementById('rc-c-kcal');
+    const cDist = document.getElementById('rc-c-dist');
+    if(cKcal) cKcal.textContent = scRef.totalKcal.toFixed(0);
+    if(cDist) cDist.textContent = fmtMin(scRef.totalMin);
+    const cTrvl = document.getElementById('rc-c-travel');
+    if(cTrvl) cTrvl.textContent = `이동 ${scRef.travelKcal.toFixed(0)}kcal + 작업 ${(scRef.totalKcal-scRef.travelKcal).toFixed(0)}kcal`;
+  }
+
+  // ── 피크 피로도 표시 ────────────────────────────────────────
+  function fatigueBar(peak) {
+    const pct = Math.min(peak * 100, 100).toFixed(0);
+    const col = peak > 0.5 ? '#ef4444' : peak > 0.3 ? '#f59e0b' : '#10b981';
+    return `<div style="display:flex;align-items:center;gap:5px">
+      <span style="font-size:9px;color:#888;white-space:nowrap">피크 피로</span>
+      <div style="flex:1;height:5px;background:#f0f0f0;border-radius:3px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${col};border-radius:3px"></div>
+      </div>
+      <span style="font-size:9px;font-weight:700;color:${col}">${(peak*100).toFixed(0)}%</span>
+    </div>`;
+  }
+
+  const eFatigue = document.getElementById('rc-e-fatigue');
+  const cFatigue = document.getElementById('rc-c-fatigue');
+  const gFatigue = document.getElementById('rc-g-fatigue');
+  const bFatigue = document.getElementById('rc-b-fatigue');
+
+  if(eFatigue){ eFatigue.innerHTML=fatigueBar(se.peakFatigue); eFatigue.style.display='block'; }
+  if(gFatigue){ gFatigue.innerHTML=fatigueBar(sg.peakFatigue); gFatigue.style.display='block'; }
+  if(bFatigue){ bFatigue.innerHTML=fatigueBar(sb.peakFatigue); bFatigue.style.display='block'; }
+  if(cFatigue && scRef){ cFatigue.innerHTML=fatigueBar(scRef.peakFatigue); cFatigue.style.display='block'; }
+
+  // ── 현재 배송순서(기준값) 대비 개선율 표시 ──────────────────
+  const eSub = document.getElementById('route-sub-E');
+  const gSub = document.getElementById('route-sub-G');
+  const bSub = document.getElementById('route-sub-B');
+  // 개선/악화를 정직하게 표시하는 헬퍼
+  function deltaTxt(refVal, val, color, unit){
+    const red = (refVal - val) / refVal * 100;
+    if(red > 0.5)  return `현재 대비 <b style="color:${color}">▼${red.toFixed(1)}% ${unit}</b>`;
+    if(red < -0.5) return `현재 대비 <span style="color:#9ca3af">△${(-red).toFixed(1)}% 높음</span>`;
+    return `현재와 유사`;
+  }
+  if(scRef){
+    if(eSub) eSub.innerHTML = `🎯 총 피로 최소화 · ` + deltaTxt(scRef.totalKcal, se.totalKcal, '#10b981', '감소') + ` (Visentin 2018)`;
+    if(bSub) bSub.innerHTML = `🎯 피로 피크 최소화 · ` + deltaTxt(scRef.peakFatigue, sb.peakFatigue, '#7c3aed', '감소');
+    if(gSub) gSub.innerHTML = `🎯 이동거리 최소화 · ` + deltaTxt(scRef.totalDist, sg.totalDist, '#0284c7', '단축') + ` (TSP)`;
+  }
+
+  // 도로경로 거리 표시용 (기존 호환)
+  if(!document.getElementById('route-stat-E')){
+    const eCard=document.getElementById('card-energy');
+    if(eCard){
+      const span=document.createElement('div');
+      span.id='route-stat-E';
+      span.style.cssText='font-size:9px;color:#888;margin-top:3px';
+      eCard.querySelector('.route-body').appendChild(span);
+    }
+  }
+  if(!document.getElementById('route-stat-G')){
+    const gCard=document.getElementById('card-group');
+    if(gCard){
+      const span=document.createElement('div');
+      span.id='route-stat-G';
+      span.style.cssText='font-size:9px;color:#888;margin-top:3px';
+      gCard.querySelector('.route-body').appendChild(span);
+    }
+  }
+}
+ 
+const MET_TRAVEL_DISPLAY = 2.5; // 노드 간 이동 MET (calcStats와 동일)
+function renderOptList(){
+  const list=document.getElementById('optimize-list');
+  list.innerHTML='';
+  const order = optMode==='energy' ? energyOrder
+              : optMode==='coupang' ? coupangOrder
+              : optMode==='balance' ? balanceOrder
+              : groupOrder;
+  const color = optMode==='energy' ? '#f59e0b'
+              : optMode==='coupang' ? '#6b7280'
+              : optMode==='balance' ? '#7c3aed'
+              : '#0284c7';
+  const stepClass = optMode==='energy' ? 'energy-step'
+                  : optMode==='coupang' ? 'group-step'
+                  : 'group-step';
+
+  // 헤더
+  const hdr=document.createElement('div');
+  hdr.className='opt-header';
+  if(optMode==='coupang'){
+    list.innerHTML=`<div class="opt-header">🚚 현재 배송 순서 <span style="color:#6b7280;font-size:10px">기숙사E→D→A→B→C → 학생→어문 → ... → 백년관</span></div>`;
+  } else if(optMode==='energy'){
+    hdr.innerHTML=`<div class="opt-title">🔥 에너지 오름차순 최적화</div><div class="opt-sub-text">🎯 목적함수: 총 피로 최소화 · 저부하 먼저 → 고부하 나중 (Visentin 2018)</div>`;
+  } else if(optMode==='balance'){
+    hdr.innerHTML=`<div class="opt-title">⚖️ 작업강도 균등분배</div><div class="opt-sub-text">🎯 목적함수: 피로 피크 최소화 · 고·저부하 번갈아 배치로 회복 시간 확보</div>`;
+  } else {
+    hdr.innerHTML=`<div class="opt-title">📍 그룹 + 최단거리 최적화</div><div class="opt-sub-text">🎯 목적함수: 이동거리 최소화 · Nearest Neighbor TSP</div>`;
+  }
+  list.appendChild(hdr);
+
+  let lastGroup='';
+  let lastSg='';
+  order.forEach((d,i)=>{
+    // ── 서브그룹(물리적 단지) 구분선 — 모든 모드 공통 ──
+    const sgKey = buildingSubgroupOf(d.building);
+    if(sgKey && sgKey!==lastSg){
+      const sg=SUBGROUPS[sgKey];
+      const div=document.createElement('div');
+      div.className='group-divider';
+      div.style.background='#ecfeff'; div.style.borderColor='#67e8f9';
+      div.innerHTML=`<span style="color:#0e7490">📍 ${sg.name} · ${sg.route} — 1회 주차 후 도보 순회 (${sg.buildings.length}개 동)</span>`;
+      list.appendChild(div);
+      lastSg=sgKey; lastGroup='';   
+    } else if(!sgKey){ lastSg=''; }
+    const inSubgroup = !!sgKey; 
+    if(optMode==='coupang' && !inSubgroup){
+      // 쿠팡 순서: 에너지 위험도가 바뀔 때 구분선
+      const risk = d.risk || 'LOW';
+      if(risk !== lastGroup){
+        const riskLabel = {LOW:'🟢 LOW',MEDIUM:'🟡 MEDIUM',HIGH:'🔴 HIGH'}[risk]||risk;
+        const rdiv=document.createElement('div');
+        rdiv.innerHTML=`<div style="font-size:9px;font-weight:700;color:#9ca3af;padding:6px 10px 2px;letter-spacing:.05em">${riskLabel}</div>`;
+        list.appendChild(rdiv);
+        lastGroup=risk;
+      }
+    }
+    if(optMode==='group'&&!inSubgroup&&d.group!==lastGroup){
+      const gLabelMap={LOW:'🟢 LOW 그룹 (저부하 먼저)',MEDIUM:'🟡 MEDIUM 그룹',HIGH:'🔴 HIGH 그룹 (고부하 마지막)'};
+      const gColMap={LOW:'#16a34a',MEDIUM:'#ca8a04',HIGH:'#dc2626'};
+      const div=document.createElement('div');
+      div.className='group-divider';
+      div.innerHTML=`<span style="color:${gColMap[d.group]}">${gLabelMap[d.group]}</span>`;
+      list.appendChild(div);
+      lastGroup=d.group;
+    }
+    const st=DELIVERY_STATUS[d.building];
+    const isDone=st&&st.status==='complete';
+    const idx=DATA.findIndex(x=>x.building===d.building);
+    const el=document.createElement('div');
+    el.className='opt-item';
+    el.style.opacity=isDone?'0.45':'1';
+    el.innerHTML=`
+      <div class="opt-step ${isDone?'done-step':stepClass}">${isDone?'✓':(i+1)}</div>
+      <div class="opt-info">
+        <div class="opt-name" style="${isDone?'text-decoration:line-through;color:#aaa':''}">${d.building}</div>
+        <div class="opt-detail">${fmtDist(d.distFromPrev)} 이동 · 누적 ${fmtDist(d.cumDist)} · 이동 ${(MET_TRAVEL_DISPLAY * SIM.W * (d.distFromPrev / 83 / 60)).toFixed(1)}kcal</div>
+      </div>
+      <div class="opt-right">
+        <div class="opt-kcal" style="color:${eColor(liveBuildingKcal(DATA[idx]||d))}">${heatKcal(liveBuildingKcal(DATA[idx]||d)).toFixed(1)} kcal</div>
+        <div class="opt-dist">${d.risk}</div>
+      </div>`;
+    el.addEventListener('click',()=>{map.setCenter(new naver.maps.LatLng(d.lat,d.lng));map.setZoom(17);setTimeout(()=>openDetail(d,idx),200);});
+    list.appendChild(el);
+  });
+  renderCompare();
+}
+
+function switchOptMode(mode){
+  optMode=mode; 
+  showRouteE = mode==='energy';
+  showRouteG = mode==='group';
+  applyRouteVisibility();
+  // 토글바 버튼 상태도 동기화
+  const _be2=document.getElementById('btn-route-e'); if(_be2) _be2.className='tbtn'+(showRouteE?' on-energy':'');
+  const _bg2=document.getElementById('btn-route-g'); if(_bg2) _bg2.className='tbtn'+(showRouteG?' on-group':'');
+
+  const ce=document.getElementById('card-energy');
+  const cg=document.getElementById('card-group');
+  const cc=document.getElementById('card-coupang');
+  const cb=document.getElementById('card-balance');
+  const chkE=document.getElementById('chk-energy');
+  const chkG=document.getElementById('chk-group');
+  const chkC=document.getElementById('chk-coupang');
+  const chkB=document.getElementById('chk-balance');
+  if(ce&&cg){
+    ce.className='route-card'+(mode==='energy'?' selected-energy':'');
+    cg.className='route-card'+(mode==='group'?' selected-group':'');
+    if(cc) cc.className='route-card'+(mode==='coupang'?' selected-group':'');
+    if(cc) cc.style.borderLeftColor=mode==='coupang'?'#6b7280':'transparent';
+    if(cb){ cb.className='route-card'+(mode==='balance'?' selected-group':''); cb.style.borderLeftColor=mode==='balance'?'#7c3aed':'transparent'; }
+    if(chkE) chkE.textContent=mode==='energy'?'✓':'';
+    if(chkG) chkG.textContent=mode==='group'?'✓':'';
+    if(chkC) chkC.textContent=mode==='coupang'?'✓':'';
+    if(chkB) chkB.textContent=mode==='balance'?'✓':'';
+  }
+  renderOptList();
+}
+
+// ── 탭 전환 ──────────────────────────────────────────────────
+function switchTab(tab){
+  currentTab=tab;
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['energy','status','optimize'][i]===tab));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`panel-${tab}`).classList.add('active');
+ 
+  if(tab==='optimize'){
+    roadDistFetched=false; 
+    autoFetchRoadDist();
+  }
+} 
+
+let roadDistFetched = false;
+async function autoFetchRoadDist() {
+  if(roadDistFetched) return;
+  const z = map.getZoom();
+  try {
+ 
+    const [resE, resG, resC] = await Promise.all([
+      fetchRoadPath(energyOrder),
+      fetchRoadPath(groupOrder),
+      coupangOrder.length > 0 ? fetchRoadPath(coupangOrder) : Promise.resolve(null)
+    ]);
+
+
+    if(resE) {
+      const km=(resE.dist/1000).toFixed(1), min=Math.round(resE.dur/60);
+      // 카드 메인 거리 업데이트
+      const _set = (id, t) => { const el=document.getElementById(id); if(el) el.textContent=t; };
+      _set('rc-e-dist', `${km}km`);
+      _set('rc-e-road', `🛣️ 도로 ${km}km`);
+      _set('rc-e-time', `🚗 약 ${min}분`);
+      _set('route-stat-E', `🛣️ ${km}km · 🚗 ${min}분`);
+      
+      if(roadPolyE) roadPolyE.setMap(null);
+      roadPolyE = new naver.maps.Polyline({
+        map: showRouteE && z>=Z_BUBBLE ? map : null,
+        path: resE.path, strokeColor:'#f59e0b',
+        strokeWeight:4, strokeOpacity:.9
+      });
+ 
+      if(routePolyE) routePolyE.setMap(null);
+    }
+
+    // ── 최단거리 TSP ──
+    if(resG) {
+      const km=(resG.dist/1000).toFixed(1), min=Math.round(resG.dur/60);
+      const _set = (id, t) => { const el=document.getElementById(id); if(el) el.textContent=t; };
+      _set('rc-g-dist', `${km}km`);
+      _set('rc-g-road', `🛣️ 도로 ${km}km`);
+      _set('rc-g-time', `🚗 약 ${min}분`);
+      _set('route-stat-G', `🛣️ ${km}km · 🚗 ${min}분`);
+      if(roadPolyG) roadPolyG.setMap(null);
+      roadPolyG = new naver.maps.Polyline({
+        map: showRouteG && z>=Z_BUBBLE ? map : null,
+        path: resG.path, strokeColor:'#0284c7',
+        strokeWeight:4, strokeOpacity:.9
+      });
+      if(routePolyG) routePolyG.setMap(null);
+    }
+
+    // ── 쿠팡 기본 순서 ──
+    if(resC) {
+      const km=(resC.dist/1000).toFixed(1);
+      const driveMin=Math.round(resC.dur/60);
+      const serviceMin=Math.round(calcTotalServiceTime(coupangOrder));
+      const totalMin=driveMin+serviceMin;
+      const totalH=Math.floor(totalMin/60), totalM=totalMin%60;
+      const _set = (id, t) => { const el=document.getElementById(id); if(el) el.textContent=t; };
+      _set('rc-c-dist', `${km}km`);
+      _set('rc-c-road', `🛣️ 도로 ${km}km`);
+      _set('rc-c-time', `🚗 ${driveMin}분`);
+      _set('rc-c-totaltime', `⏱️ 총 ${totalH>0?totalH+'시간 ':''}${totalM}분`);
+      // 쿠팡 기본 순서 도로 경로선 (회색)
+      if(roadPolyC) roadPolyC.setMap(null);
+      roadPolyC = new naver.maps.Polyline({
+        map: optMode==='coupang' && z>=Z_BUBBLE ? map : null,
+        path: resC.path,
+        strokeColor:'#6b7280',
+        strokeWeight:4,
+        strokeOpacity:.8,
+        strokeStyle:'solid'
+      });
+    }
+
+    roadMode = true; // 도로 모드 활성화
+    setRoadBtnState(false);
+    roadDistFetched = true;
+    applyRouteVisibility();         
+  } catch(e) {
+    console.warn('도로 경로 계산 실패:', e);
+    // 실패시 직선 거리 표시
+    const se=calcStats(energyOrder), sg=calcStats(groupOrder);
+    const _set = (id, t) => { const el=document.getElementById(id); if(el) el.textContent=t; };
+    _set('rc-e-dist', fmtDist(se.totalDist));
+    _set('rc-g-dist', fmtDist(sg.totalDist));
+    _set('rc-e-road', '🛣️ —');
+    _set('rc-g-road', '🛣️ —');
+  }
+}
+
+// ── 에너지 랭킹 렌더 ────────── 
+function rebuildRanking(){
+  try {
+    const rankList = document.getElementById('ranking-list');
+    if (!rankList) { console.error('ranking-list element not found'); return; }
+    rankList.innerHTML = '';
+    if (!DATA || !DATA.length) {
+      rankList.innerHTML = '<div style="padding:20px;color:#888;font-size:12px;text-align:center">DATA 비어있음</div>';
+      return;
+    } 
+    const items = DATA.map((d, origIdx) => ({d, origIdx})).filter(o=>!o.d.no_delivery);
+    if (datasetLoaded) {
+      items.sort((a, b) => (liveBuildingKcal(b.d) - liveBuildingKcal(a.d)));
+    }
+    items.forEach(({d, origIdx}, i) => {
+      const kcal = liveBuildingKcal(d);
+      const col  = eColor(heatKcal(kcal));
+      const nc   = i===0?'r1':i===1?'r2':i===2?'r3':'';
+      const boxes = (DELIVERY_STATUS[d.building]||{}).count || 0;
+      const boxBadge = datasetLoaded
+        ? `<div class="rsub">${MODE_KR[d.delivery_mode]} · ${d.max_floor}층 · 📦${boxes}박스</div>`
+        : `<div class="rsub">${MODE_KR[d.delivery_mode]} · ${d.max_floor}층</div>`;
+      // Range scales proportionally to today's actual kcal (so the "범위" stays meaningful).
+      const scale = datasetLoaded && d.mean_kcal>0 ? (kcal / d.mean_kcal) : 1;
+      const lo = d.p10_kcal * scale, hi = d.p90_kcal * scale;
+      const el = document.createElement('div');
+      el.className = 'rank-item'; el.dataset.i = origIdx;
+      el.innerHTML = `
+        <div class="rank-num ${nc}">${i+1}</div>
+        <div class="rdot" style="background:${col}"></div>
+        <div class="rinfo"><div class="rname">${d.building}</div>${boxBadge}</div>
+        <div style="text-align:right">
+          <div class="rkcal" style="color:${col}">${kcal.toFixed(1)} kcal</div>
+          <div class="rrange">${lo.toFixed(1)}~${hi.toFixed(1)}</div>
+        </div>`;
+      el.addEventListener('click', () => {
+        map.setCenter(new naver.maps.LatLng(d.lat, d.lng));
+        map.setZoom(17);
+        setTimeout(() => openDetail(d, origIdx), 200);
+      });
+      rankList.appendChild(el);
+    });
+  } catch(e) {
+    console.error('ranking list build failed:', e);
+    const rl = document.getElementById('ranking-list');
+    if (rl) rl.innerHTML = '<div style="padding:20px;color:#dc2626;font-size:11px">랭킹 렌더 오류:<br>' + (e.message||e) + '</div>';
+  }
+}
+rebuildRanking();
+
+// ── 배송현황 렌더 ─────────────────────────────────────────────
+function renderDeliveryList(){
+  const list=document.getElementById('delivery-list');
+  list.innerHTML='';
+  const statusOrder={complete:0,wait:1};
+  const entries=Object.entries(DELIVERY_STATUS)
+    .filter(([,v])=>statusFilter==='all'||v.status===statusFilter)
+    .sort((a,b)=>statusOrder[a[1].status]-statusOrder[b[1].status]);
+  // 요약
+  const all=Object.values(DELIVERY_STATUS);
+  const summary=document.createElement('div');
+  summary.style.cssText='display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid #f5f5f5;background:#fafafa';
+  ['complete','wait'].forEach(s=>{
+    const cnt=all.filter(x=>x.status===s).length;
+    const labels={complete:'완료',wait:'배송대기'};
+    summary.innerHTML+=`<div style="flex:1;text-align:center;padding:5px 0;border-radius:5px;background:${STATUS_BG[s]}"><div style="font-size:14px;font-weight:800;color:${STATUS_COL[s]}">${cnt}</div><div style="font-size:9px;color:${STATUS_COL[s]}">${labels[s]}</div></div>`;
+  });
+  list.appendChild(summary);
+  if(!entries.length){
+    list.innerHTML+=`<div style="padding:20px;text-align:center;color:#aaa;font-size:12px">해당 상태 없음</div>`;return;
+  }
+  entries.forEach(([name,st])=>{
+    const d=DATA.find(x=>x.building===name);if(!d)return;
+    const i=DATA.indexOf(d);
+    const el=document.createElement('div');
+    el.className='delivery-item'; el.dataset.i=i;
+    el.innerHTML=`
+      <div class="d-badge d-${st.status}">${STATUS_KR[st.status]}</div>
+      <div class="d-info"><div class="d-name">${name}</div><div class="d-sub">${d.max_floor}층 · ${st.items.join(', ')}</div></div>
+      <div class="d-cnt">${st.count}건</div>`;
+    el.addEventListener('click',()=>{map.setCenter(new naver.maps.LatLng(d.lat,d.lng));map.setZoom(17);setTimeout(()=>openDetail(d,i),200);});
+    list.appendChild(el);
+  });
+}
+
+function filterStatus(f){
+  statusFilter=f;
+  ['all','complete','wait'].forEach(k=>{
+    const btn = document.getElementById('sf-'+k);
+    if (btn) btn.className='sf-btn'+(k===f?` on-${k==='all'?'all':k}`:'');
+  });
+  renderDeliveryList();
+  statusMarkers.forEach(s=>{
+    const show=(f==='all'||s.status===f)&&showBubble&&map.getZoom()>=ZOOM_TH;
+    s.marker.setMap(show?map:null);
+  });
+}
+
+renderDeliveryList();
+renderOptList();
+
+// ── 상세 팝업 ─────────────────────────────────────────────────
+function openDetail(d,i){
+  const liveK=liveBuildingKcal(d);
+  const col=eColor(liveK);
+  const st=DELIVERY_STATUS[d.building];
+  document.getElementById('dn').textContent=d.building;
+  document.getElementById('dm').textContent=MODE_KR[d.delivery_mode];
+  const hkd=heatKcal(liveK);
+  const _measuredSrc = (typeof d.measuredKcal==='number' && d.measuredKcal>0)
+        ? (d.measuredFlag ? ' · 📍실측(센서)' : ' · 📍실측(기록)')
+        : (datasetLoaded ? ' · 🧮실무게 예측' : ' · 🧮시뮬 예측');
+  const wInfo=(datasetLoaded&&d.actualBoxes>0)?` · ${d.actualBoxes}박스 평균 ${d.actualAvgKg.toFixed(1)}kg`:'';
+  document.getElementById('d-mean').textContent=hkd.toFixed(1)+(heatState.multiplier>1?' (×'+heatState.multiplier.toFixed(2)+')':'')+wInfo+_measuredSrc;
+  document.getElementById('d-status').innerHTML=st?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:${STATUS_BG[st.status]};color:${STATUS_COL[st.status]}">${STATUS_KR[st.status]} (${st.count}건)</span>`:`<span style="font-size:10px;color:#aaa">해당없음</span>`;
+  const liveMax=Math.max(...DATA.map(x=>liveBuildingKcal(x)))||1;
+  document.getElementById('d-bar').style.cssText=`width:${(liveK/liveMax*100).toFixed(0)}%;background:${col};opacity:.85;`;
+  const scale=liveK/(d.mean_kcal||1);
+  document.getElementById('d-p10').textContent=(d.p10_kcal*scale).toFixed(1)+' (P10)';
+  document.getElementById('d-p90').textContent=(d.p90_kcal*scale).toFixed(1)+' (P90)';
+  document.getElementById('d-floor').textContent=d.max_floor+'층';
+  document.getElementById('d-elev').textContent=d.has_elevator?'있음 🛗':'없음';
+  document.getElementById('d-dm').textContent=MODE_KR[d.delivery_mode];
+  const er=energyRankMap[d.building], gr=groupRankMap[d.building];
+  document.getElementById('d-erank').textContent=er?`${er}번째`:'대상외';
+  document.getElementById('d-grank').textContent=gr?`${gr}번째`:'대상외';
+
+  // 온도 위험도
+  const heatRow = document.getElementById('d-heat-row');
+  const heatRisk = document.getElementById('d-heat-risk');
+  if(heatState.multiplier > 1) {
+    heatRow.style.display = '';
+    const riskMap = {
+      1.05: {cls:'hb-warn',    label:'⚠️ 고온 주의 (×1.05)'},
+      1.12: {cls:'hb-danger',  label:'🌡️ 고온 경고 (×1.12)'},
+      1.20: {cls:'hb-critical',label:'🚨 폭염 위험 (×1.20)'},
+    };
+    const r = riskMap[heatState.multiplier] || {cls:'hb-warn', label:'⚠️ 열환경 주의'};
+    heatRisk.innerHTML = `<span class="heat-badge ${r.cls}">${r.label}</span>`;
+  } else {
+    heatRow.style.display = '';
+    heatRisk.innerHTML = '<span class="heat-badge hb-ok">✅ 정상 (×1.00)</span>';
+  }
+
+  // 층별 에너지 차트 (floor_delivery / mixed만 의미있음)
+  const chartEl = document.getElementById('d-floor-chart');
+  if(d.delivery_mode === 'storage') {
+    chartEl.innerHTML = '';
+  } else {
+    const AVG_PKG = 3.65;
+    const floorData = [];
+    for(let f=1; f<=d.max_floor; f++) {
+      const e = floorBatchE(1, AVG_PKG, f, d.has_elevator,
+        SIM.HALLWAY[SIM.HALLWAY_TYPE[d.building]||'room_direct']) / 4184 * heatState.multiplier;
+      floorData.push({floor:f, kcal:e});
+    }
+    const maxE = Math.max(...floorData.map(x=>x.kcal));
+    const bars = floorData.map(x=>{
+      const pct = (x.kcal/maxE*100).toFixed(0);
+      const col = eColor(x.kcal * 3); // 강조
+      return `<div class="floor-row">
+        <div class="floor-label">${x.floor}층</div>
+        <div class="floor-bar-bg"><div class="floor-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        <div class="floor-val" style="color:${col}">${x.kcal.toFixed(1)}</div>
+      </div>`;
+    }).join('');
+    chartEl.innerHTML = `
+      <div class="floor-chart-title">📊 층별 박스 1개 기준 에너지 (kcal)</div>
+      ${bars}`;
+  }
+
+  document.getElementById('detail').style.display='block';
+  document.querySelectorAll('.rank-item,.delivery-item,.opt-item').forEach(el=>el.classList.remove('active'));
+  const t=document.querySelector(`[data-i="${i}"]`);
+  if(t){t.classList.add('active');t.scrollIntoView({block:'nearest',behavior:'smooth'});}
+}
+function closeDetail(){
+  document.getElementById('detail').style.display='none';
+  document.querySelectorAll('.rank-item,.delivery-item,.opt-item').forEach(el=>el.classList.remove('active'));
+}
+
+// ── 레이어 토글 ───────────────────────────────────────────────
+function toggleLayer(type){
+  if(type==='heat'){
+    showHeat=!showHeat;
+    // 줌인(건물 단계)에서만 개별 히트맵 원 표시. 줌아웃 시엔 지역 합산 원만.
+    const showNow = showHeat && map.getZoom()>=Z_BUBBLE;
+    heatCircles.forEach(c=>c.setMap(showNow?map:null));
+    document.getElementById('btn-heat').classList.toggle('on',showHeat);
+  } else {
+    showBubble=!showBubble;
+    if(map.getZoom()>=ZOOM_TH){
+      bubbleMarkers.forEach(m=>m.setMap(showBubble?map:null));
+      statusMarkers.forEach(s=>s.marker.setMap(showBubble?map:null));
+    }
+    document.getElementById('btn-bubble').classList.toggle('on',showBubble);
+  }
+}
+function toggleRoute(type){
+  // Legacy entry point — redirect to new single-route picker.
+  pickRouteOnly(type);
+}
+
+// ── 단일 경로 선택 모델 ────────────────── 
+let pickedRoute = null;
+function pickRouteOnly(key) {
+  pickedRoute = key;
+  // Sync card-driven optMode + driver toggle flags so other code paths agree.
+  if (key) {
+    optMode = key;
+    showRouteE = (key === 'energy');
+    showRouteG = (key === 'group');
+    if (typeof switchOptMode === 'function' && currentTab === 'optimize') {
+      // refresh the optimize tab card highlights without re-recursing into pickRouteOnly
+      _syncOptCardSelection(key);
+    } else {
+      _syncOptCardSelection(key);
+    }
+  } else {
+    optMode = null;
+    showRouteE = showRouteG = false;
+    _syncOptCardSelection(null);
+  }
+  _syncRouteButtonStates();
+  applyRouteVisibility();
+}
+
+function _syncRouteButtonStates(){
+  const map = {
+    energy:  {id:'btn-route-energy',  bg:'#f59e0b'},
+    group:   {id:'btn-route-group',   bg:'#0284c7'},
+    balance: {id:'btn-route-balance', bg:'#7c3aed'},
+    coupang: {id:'btn-route-coupang', bg:'#6b7280'},
+  };
+  Object.entries(map).forEach(([key, cfg]) => {
+    const btn = document.getElementById(cfg.id); if (!btn) return;
+    if (key === pickedRoute) {
+      btn.style.background = cfg.bg;
+      btn.style.color = '#fff';
+      btn.style.borderColor = cfg.bg;
+    } else {
+      btn.style.background = '#fff';
+      btn.style.color = cfg.bg;
+      btn.style.borderColor = cfg.bg;
+    }
+  });
+  const off = document.getElementById('btn-route-off');
+  if (off) {
+    const isOff = pickedRoute === null;
+    off.style.background = isOff ? '#374151' : '#fff';
+    off.style.color = isOff ? '#fff' : '#9ca3af';
+    off.style.borderColor = isOff ? '#374151' : '#e0e0e0';
+  }
+}
+
+// Optimize-tab cards also reflect the selection (without recursing).
+function _syncOptCardSelection(key) {
+  const cards = {
+    energy:  document.getElementById('card-energy'),
+    group:   document.getElementById('card-group'),
+    balance: document.getElementById('card-balance'),
+    coupang: document.getElementById('card-coupang'),
+  };
+  Object.entries(cards).forEach(([k, el]) => {
+    if (!el) return;
+    el.style.borderLeftColor = (k === key) ? ({energy:'#f59e0b',group:'#0284c7',balance:'#7c3aed',coupang:'#6b7280'}[k]) : 'transparent';
+    const chk = document.getElementById('chk-'+k);
+    if (chk) chk.textContent = (k === key) ? '✓' : '';
+  });
+}
+ 
+function styleRoute(poly, selected){ 
+  if(!poly) return;
+  poly.setOptions({
+    strokeStyle:  'shortdash',
+    strokeOpacity: selected ? 0.92 : 0,
+    strokeWeight:  selected ? 4 : 0
+  });
+}
+function applyRouteVisibility(){
+  const z = (typeof map !== 'undefined' && map) ? map.getZoom() : 18;
+  const visibleAtZoom = z >= Z_BUBBLE;
+  const routes = [
+    { key:'energy',  poly:routePolyE, road:roadPolyE, color:'#f59e0b', markers:routeMarkersE },
+    { key:'group',   poly:routePolyG, road:roadPolyG, color:'#0284c7', markers:routeMarkersG },
+    { key:'balance', poly:routePolyB, road:null,      color:'#7c3aed', markers:routeMarkersB },
+    { key:'coupang', poly:routePolyC, road:roadPolyC, color:'#6b7280', markers:routeMarkersC },
+  ];
+  routes.forEach(r => {
+    const isPicked = (r.key === pickedRoute); 
+    if (r.road) {
+      try {
+        r.road.setOptions({
+          strokeColor:  r.color,
+          strokeStyle:  'shortdash',
+          strokeWeight: 4,
+          strokeOpacity: 0.92
+        });
+      } catch(e) {}
+      r.road.setMap(isPicked && visibleAtZoom ? map : null);
+    }
+    if (r.poly) {
+      try {
+        r.poly.setOptions({
+          strokeColor:  r.color,
+          strokeStyle:  'shortdash',
+          strokeWeight: 4,
+          strokeOpacity: 0.92
+        });
+      } catch(e) {} 
+      const showPoly = isPicked && visibleAtZoom && (!r.road || !roadDistFetched);
+      r.poly.setMap(showPoly ? map : null);
+    }
+    // Step number markers — only the picked route.
+    r.markers.forEach(m => m.setMap((isPicked && z>=Z_ROUTE) ? map : null));
+  });
+}
+
+// ── 사이드바 ─────────────────────────────────────────────────
+function toggleSidebar(){
+  const sb=document.getElementById('sidebar'),btn=document.getElementById('mob-toggle');
+  const isOpen=sb.classList.toggle('open');
+  btn.textContent=isOpen?'✕ 닫기':'📊 패널 보기';
+}
+function toggleCollapse(){
+  const sb=document.getElementById('sidebar'),btn=document.getElementById('collapse-btn');
+  const isC=sb.classList.toggle('collapsed');
+  btn.textContent=isC?'▶':'◀';
+  btn.style.cssText=isC?'position:fixed;left:0;top:50%;transform:translateY(-50%);width:26px;height:52px;background:#fff;border:1px solid #e0e0e0;border-left:none;border-radius:0 7px 7px 0;cursor:pointer;font-size:10px;color:#555;display:flex;align-items:center;justify-content:center;box-shadow:2px 0 6px rgba(0,0,0,.12);z-index:700;':'';
+}
+naver.maps.Event.addListener(map,'click',function(){
+  const sb=document.getElementById('sidebar');
+  if(sb.classList.contains('open'))sb.classList.remove('open');
+});
+
+// ── GPS & 실시간 위치 추적 ────────────────────────────────────
+let myLocMarker=null, myLocCircle=null, watchId=null, isTracking=false;
+
+function updateMyLoc(lat, lng, acc) {
+  if(myLocMarker) myLocMarker.setMap(null);
+  if(myLocCircle) myLocCircle.setMap(null);
+
+  // 정확도 원
+  myLocCircle = new naver.maps.Circle({
+    map, center: new naver.maps.LatLng(lat,lng), radius: acc,
+    fillColor:'#3b82f6', fillOpacity:.10,
+    strokeColor:'#3b82f6', strokeWeight:1, strokeOpacity:.4
+  });
+
+  // 현재 위치 파란 점 마커 (구글 맵 스타일)
+  myLocMarker = new naver.maps.Marker({
+    position: new naver.maps.LatLng(lat,lng), map,
+    icon: {
+      content: `<div style="position:relative;width:32px;height:32px;transform:translate(-50%,-50%)">
+        <div style="position:absolute;inset:0;border-radius:50%;background:#3b82f6;opacity:.25;animation:pulse 1.5s infinite"></div>
+        <div style="position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 2px 10px rgba(59,130,246,.6)"></div>
+      </div>`,
+      anchor: new naver.maps.Point(16,16)
+    }
+  });
+}
+
+function goMyLocation(){
+  const btn = document.getElementById('gps-btn');
+  if(!navigator.geolocation){ alert('위치 서비스 미지원 — 다른 브라우저로 시도해주세요'); return; }
+ 
+  const isSecure = (location.protocol === 'https:') || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!isSecure) {
+    alert('⚠️ GPS는 HTTPS에서만 동작합니다.\n\n현재 주소: ' + location.protocol + '//' + location.hostname + '\n\n해결: Colab Cell 7에서 출력된 https://xxxx.ngrok-free.app/heatmap 주소로 다시 접속하세요.\n(파일 직접 열기 또는 http:// 로는 작동하지 않음)');
+    return;
+  }
+ 
+  if(isTracking) {
+    if(watchId) navigator.geolocation.clearWatch(watchId);
+    if(myLocMarker) myLocMarker.setMap(null);
+    if(myLocCircle) myLocCircle.setMap(null);
+    myLocMarker = myLocCircle = watchId = null;
+    isTracking = false;
+    btn.classList.remove('active');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg> 📍 내 위치';
+    return;
+  }
+
+  btn.classList.add('active');
+  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg> 📍 찾는 중…';
+ 
+  const safetyTO = setTimeout(() => {
+    if(!isTracking){
+      btn.classList.remove('active');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg> 📍 내 위치';
+      alert('GPS 응답이 없습니다. 위치 권한을 확인하거나 야외로 이동 후 다시 시도해주세요.');
+    }
+  }, 20000);
+
+  // 첫 위치 즉시 가져오기
+  navigator.geolocation.getCurrentPosition(pos => {
+    clearTimeout(safetyTO);
+    const {latitude:lat, longitude:lng, accuracy:acc} = pos.coords;
+    updateMyLoc(lat, lng, acc);
+    map.setCenter(new naver.maps.LatLng(lat, lng));
+    map.setZoom(17);
+
+    // 경로 재계산
+    startLat=lat; startLng=lng;
+    roadDistFetched = false;
+    energyOrder=calcEnergyOrder(lat,lng);
+    groupOrder=calcGroupOrder(lat,lng);
+    balanceOrder=calcBalanceOrder(lat,lng);
+    energyRankMap=buildRankMap(energyOrder);
+    groupRankMap=buildRankMap(groupOrder);
+    if (typeof rebuildAllRoutePolylines === 'function') rebuildAllRoutePolylines();
+    if (typeof applyRouteVisibility === 'function') applyRouteVisibility();
+    updateZoom();
+    renderOptList();
+
+    isTracking = true;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg> 📍 추적 중';
+
+    watchId = navigator.geolocation.watchPosition(p => {
+      updateMyLoc(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
+      map.setCenter(new naver.maps.LatLng(p.coords.latitude, p.coords.longitude));
+    }, null, {enableHighAccuracy:true, maximumAge:3000});
+
+  }, err => {
+    clearTimeout(safetyTO);
+    btn.classList.remove('active');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg> 📍 내 위치';
+    if(err.code===1) alert('위치 권한 거부됨\n\n📱 iPhone: 설정 → Safari → 위치 → 허용\n📱 Android: 브라우저 주소창 옆 자물쇠 → 권한 → 위치 허용');
+    else if(err.code===2) alert('위치를 찾을 수 없습니다. GPS·Wi-Fi 확인 후 야외에서 다시 시도해주세요.');
+    else alert('위치 요청 시간 초과. 다시 시도해주세요.');
+  }, {enableHighAccuracy:true, timeout:15000, maximumAge:0});
+}
+ 
+function syncFromCourierGuard() {
+  let needsRecompute = false;
+ 
+  try {
+    const raw = localStorage.getItem('heatmap_delivery_sync');
+    if (raw) {
+      const sync = JSON.parse(raw);
+      let targetsChanged = false;
+      Object.entries(sync).forEach(([rawBldg, data]) => {
+        const bldg = _normBldg(rawBldg); 
+        if (!DELIVERY_STATUS[bldg] && DATA.some(x => x.building === bldg)) {
+          DELIVERY_STATUS[bldg] = { status:'wait', count:0, items:[] };
+          targetsChanged = true;
+        }
+        if (DELIVERY_STATUS[bldg]) {
+          DELIVERY_STATUS[bldg].status = data.status;
+          DELIVERY_STATUS[bldg].count = data.count;
+          if (data.items) DELIVERY_STATUS[bldg].items = data.items; 
+          if (typeof data.done === 'number') DELIVERY_STATUS[bldg].done = data.done;
+          if (typeof data.pending === 'number') DELIVERY_STATUS[bldg].pending = data.pending;
+        }
+      });
+      // 새 건물이 추가되면 경로 대상/순서 재계산 (DELIVERY_TARGETS는 let)
+      if (targetsChanged) {
+        DELIVERY_TARGETS = DATA.filter(d => DELIVERY_STATUS[d.building]);
+        if (typeof recomputeAllOrders === 'function') recomputeAllOrders();
+        needsRecompute = true;
+      }
+    }
+  } catch(e) { console.warn('Delivery sync error:', e); }
+ 
+  try {
+    const raw = localStorage.getItem('heatmap_pending_boxes');
+    if (raw) {
+      const pending = JSON.parse(raw);
+      Object.entries(pending).forEach(([rawBldg, boxes]) => {
+        const bldg = _normBldg(rawBldg);
+        const dRow = DATA.find(x => x.building === bldg);
+        if (!dRow) return;
+        DELIVERY_BOXES[bldg] = boxes;     // overwrite with current pending list
+        dRow.actualBoxes = boxes.length;
+        dRow.actualAvgKg = boxes.length ? boxes.reduce((s,b)=>s+(+b.pkgWeightKg||0),0)/boxes.length : 0;
+        dRow.actualKcal  = compendiumBuildingKcal(dRow, SIM.W);
+        needsRecompute = true;
+      });
+    }
+  } catch(e) { console.warn('Pending-box sync error:', e); }
+ 
+  try {
+    const raw = localStorage.getItem('heatmap_calc_sync');
+    if (raw) {
+      const sync = JSON.parse(raw);
+      const normSync = {}; Object.entries(sync).forEach(([k,v])=>{ normSync[_normBldg(k)] = v; });
+      DATA.forEach((d, i) => {
+        const count = normSync[d.building];
+        if (count > 0) {
+          const inp = document.getElementById('box-' + i);
+          if (inp && !inp.value) {
+            inp.value = count;
+            recalcBuilding(i);
+          }
+        }
+      });
+    }
+  } catch(e) { console.warn('Calc sync error:', e); }
+
+  // Re-render whatever changed
+  if (needsRecompute) {
+    buildHeatCircles();
+    rebuildBubbles();
+    if (typeof rebuildRanking === 'function') rebuildRanking();
+    if (currentTab === 'optimize' && typeof renderCompare === 'function') renderCompare();
+  } else {
+    rebuildBubbles();
+  }
+  if (currentTab === 'status') renderDeliveryList();
+  updateZoom && updateZoom();
+} 
+setTimeout(syncFromCourierGuard, 1500);
+setInterval(syncFromCourierGuard, 10000); 
+let footprintCircles = [];
+let showFootprint = false;
+let fpInterval = null;
+
+function loadFootprint() {
+  try { return JSON.parse(localStorage.getItem('energy_footprint') || '[]'); }
+  catch { return []; }
+}
+
+function fpColor(met) {
+  if (met < 2.0) return '#22c55e';
+  if (met < 3.5) return '#84cc16';
+  if (met < 5.0) return '#f59e0b';
+  if (met < 7.0) return '#f97316';
+  if (met < 9.0) return '#ef4444';
+  return '#b91c1c';
+}
+
+function renderFootprint() {
+  footprintCircles.forEach(c => c.setMap(null));
+  footprintCircles = [];
+  const data = loadFootprint();
+  if (!data.length) return;
+  const z = map.getZoom();
+  const baseR = z >= 18 ? 3 : z >= 16 ? 8 : 15;
+  data.forEach(pt => {
+    const c = new naver.maps.Circle({
+      center: new naver.maps.LatLng(pt.lat, pt.lng),
+      radius: baseR,
+      fillColor: fpColor(pt.met),
+      fillOpacity: 0.55,
+      strokeWeight: 0,
+      map: showFootprint ? map : null
+    });
+    footprintCircles.push(c);
+  });
+}
+
+function toggleFootprint() {
+  showFootprint = !showFootprint;
+  const btn = document.getElementById('btn-footprint');
+  if (showFootprint) {
+    btn.style.background = '#e11d48';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#e11d48';
+    renderFootprint();
+    fpInterval = setInterval(renderFootprint, 5000);
+  } else {
+    btn.style.background = '';
+    btn.style.color = '#e11d48';
+    btn.style.borderColor = '#e11d48';
+    footprintCircles.forEach(c => c.setMap(null));
+    footprintCircles = [];
+    if (fpInterval) { clearInterval(fpInterval); fpInterval = null; }
+  }
+}
+
+function clearFootprint() {
+  if (!confirm('실측 GPS 에너지 데이터를 모두 삭제하시겠습니까?')) return;
+  localStorage.removeItem('energy_footprint');
+  footprintCircles.forEach(c => c.setMap(null));
+  footprintCircles = [];
+  alert('✅ 실측 데이터 초기화 완료');
+}
+
+naver.maps.Event.addListener(map, 'zoom_changed', () => {
+  if (showFootprint && footprintCircles.length) renderFootprint();
+});
+ 
+function recomputeAllOrders(){ 
+  energyOrder  = calcEnergyOrder(startLat,startLng);
+  groupOrder   = calcGroupOrder(startLat,startLng);
+  balanceOrder = calcBalanceOrder(startLat,startLng);
+  energyRankMap = buildRankMap(energyOrder);
+  groupRankMap  = buildRankMap(groupOrder);
+  if(typeof coupangOrder!=='undefined' && coupangOrder.length){
+    coupangOrder = buildCoupangOrder(startLat,startLng);
+  } 
+  if (typeof rebuildAllRoutePolylines === 'function') rebuildAllRoutePolylines();
+  if (typeof applyRouteVisibility   === 'function')   applyRouteVisibility();
+}
+
+function applyDatasetLoad(load){
+  if(!load || !load.buildings) return false;
+  // Clear previous day's box list
+  Object.keys(DELIVERY_BOXES).forEach(k => delete DELIVERY_BOXES[k]);
+  let touched=0;
+  Object.entries(load.buildings).forEach(([bldg, info])=>{
+    const dRow = DATA.find(x=>x.building===bldg);
+    if(!dRow) return;                 // 14개 외 건물은 무시 (좌표 없음)
+    if(!DELIVERY_STATUS[bldg]) DELIVERY_STATUS[bldg]={status:'wait',count:0,items:[]};
+    DELIVERY_STATUS[bldg].count = info.count||0;
+    DELIVERY_STATUS[bldg].items = [`택배 ${info.count||0}`];
+    if(info.floorMax)   dRow.max_floor    = info.floorMax;
+    if('hasElevator' in info) dRow.has_elevator = !!info.hasElevator;
+
+    // ── 박스 단위 데이터가 있으면 그대로, 없으면 집계값에서 합성 ──
+    let boxes = Array.isArray(info.boxes) ? info.boxes : null;
+    if (!boxes) {
+      const cnt  = info.count||0;
+      const avgW = cnt>0 ? (info.totWeight||0)/cnt : 0;
+      const fl   = info.floorMax || dRow.max_floor || 1;
+      boxes = Array.from({length: cnt}, () => ({
+        pkgWeightKg: avgW,
+        floor: fl,
+        hasElevator: !!(info.hasElevator || dRow.has_elevator)
+      }));
+    }
+    DELIVERY_BOXES[bldg] = boxes;
+
+    // ── 박스별 Compendium 누적합으로 실측 작업 kcal 계산 ──
+    dRow.actualBoxes  = boxes.length;
+    dRow.actualAvgKg  = boxes.length ? boxes.reduce((s,b)=>s+(+b.pkgWeightKg||0),0)/boxes.length : 0;
+    dRow.actualKcal   = compendiumBuildingKcal(dRow, SIM.W);
+    touched++;
+  });
+  // 박스가 없는 건물 정리
+  DATA.forEach(d=>{
+    if(!load.buildings[d.building]){
+      if(DELIVERY_STATUS[d.building]) DELIVERY_STATUS[d.building].count = 0;
+      d.actualBoxes=0; d.actualAvgKg=0; d.actualKcal=0;
+      delete DELIVERY_BOXES[d.building];
+    }
+  });
+  datasetLoaded = true;
+  if(touched>0){
+    recomputeAllOrders();
+    buildHeatCircles();
+    rebuildBubbles();
+    buildRegionMarkers();
+    updateZoom && updateZoom();
+    if(currentTab==='optimize') { renderCompare(); renderOptList(); }
+    if(typeof drawAllRouteStyling==='function') drawAllRouteStyling();
+    // ── 데이터셋 변경 → 사이드바 3개 탭 전부 새로 그리기 ─────────
+    if(typeof rebuildRanking === 'function')      rebuildRanking();           // 에너지 탭 / 시뮬레이션 범위 예측
+    if(typeof renderDeliveryList === 'function')  renderDeliveryList();        // 배송현황 탭
+    if(typeof autoFillCalcFromDataset === 'function') autoFillCalcFromDataset(); // 에너지 탭 / 오늘 실측 계산
+    updateDatasetBanner(load.company, load.date,
+      Object.values(load.buildings).reduce((s,b)=>s+(b.count||0),0));
+  }
+  return touched>0;
+}
+ 
+function autoFillCalcFromDataset() {
+  const container = document.getElementById('calc-rows');
+  if (!container) return;
+  if (!container.children.length && typeof initCalcRows === 'function') initCalcRows();
+  DATA.forEach((d, i) => {
+    const boxes = (DELIVERY_STATUS[d.building] || {}).count || 0;
+    // Building-level "총 박스" input
+    const totInp = document.getElementById('box-'+i);
+    if (totInp) totInp.value = boxes > 0 ? boxes : ''; 
+    const list = (typeof DELIVERY_BOXES !== 'undefined') ? DELIVERY_BOXES[d.building] : null;
+    if (list && list.length && d.delivery_mode !== 'storage') {
+      const byFloor = {};
+      list.forEach(b => { const f = +b.floor || 1; byFloor[f] = (byFloor[f]||0)+1; });
+      for (let f = 1; f <= d.max_floor; f++) {
+        const fi = document.getElementById(`fi-${i}-${f}`);
+        if (fi) fi.value = byFloor[f] || '';
+      }
+      // Open the floor grid so the floor values drive the calc (visible to courier too)
+      const grid = document.getElementById('fg-'+i);
+      if (grid && !grid.classList.contains('open')) {
+        grid.classList.add('open');
+        const btn = document.getElementById('ft-'+i);
+        if (btn) btn.textContent = '층별 ▲';
+      }
+    }
+    // Recompute kcal for this row using the auto-filled values
+    if (typeof recalcBuilding === 'function') recalcBuilding(i);
+  });
+  // Sum & display total
+  if (typeof updateCalcTotal === 'function') updateCalcTotal();
+  // Restore any manual edits saved on this device — wins over the auto-fill if they exist.
+  if (typeof restoreManualCalcFromLocal === 'function') restoreManualCalcFromLocal();
+}
+ 
+const MET_2011 = {
+  walkLight:   4.0,   // 11620: 2.5 mph + 1–15 lb (0.5–6.8 kg)
+  walkMod:     4.5,   // 11625: + 16–24 lb (7.3–10.9 kg)
+  walkHeavy:   5.0,   // 11630: + 25–49 lb (11.3–22.2 kg)
+  walkVHeavy:  6.5,   // 11635: + 50–74 lb (22.7–33.6 kg)
+  walkEmpty:   3.0,   // 17170: walking 2.5 mph level, no load
+  stairUp:     5.0,   // 17134: stair climbing, slow pace, no load
+  stairUpL:    6.5,   // 17029-aligned: climbing carrying ≤25 lb
+  stairUpM:    8.0,   // 17030: climbing carrying 25–49 lb
+  stairUpH:   10.0,   // 17031: climbing carrying 50–74 lb
+  stairDown:   3.5,   // 17070: walking downstairs, no load
+  elevator:    1.0,   // riding elevator (sedentary)
+  standing:    1.5,   // 9060-aligned: standing, handover/knock/scan
+};
+function _metWalkLoad(kg){
+  if(kg < 6.8)  return MET_2011.walkLight;
+  if(kg < 10.9) return MET_2011.walkMod;
+  if(kg < 22.2) return MET_2011.walkHeavy;
+  return MET_2011.walkVHeavy;
+}
+function _metStairLoad(kg){
+  if(kg <= 0)   return MET_2011.stairUp;
+  if(kg < 11.3) return MET_2011.stairUpL;
+  if(kg < 22.2) return MET_2011.stairUpM;
+  return MET_2011.stairUpH;
+}
+
+  
+function pm_stairCarryMet(loadKg) {
+  const lbs = loadKg * 2.205;
+  if (lbs <= 15)  return 5.0;   // code 17026
+  if (lbs <= 24)  return 6.0;   // code 17027
+  if (lbs <= 49)  return 8.0;   // code 17028
+  if (lbs <= 74)  return 10.0;  // code 17029
+  return 12.0;                  // code 17030
+}
+function pm_flatCarryMet(loadKg) {
+  if (loadKg < 6.8)  return 3.5;  // code 11795
+  if (loadKg < 11.3) return 4.5;  // code 11800
+  return 5.0;                     // code 11820
+}
+const CART_KG = 15;          // 카트 사용 임계 총무게(kg) — 앱/대시보드와 동일
+const WALK_FACTOR = 0.8;     // 도보 20% 단축(배달기사 빠른 보행)
+function pm_delivPhases(d) {
+  const loadKg     = d.pkgWeightKg * d.pkgCount;
+  const floorAbove = Math.max(d.floor - 1, 0);
+  const useCart    = (d.useCart != null) ? !!d.useCart : (loadKg >= CART_KG);
+  const approachMet = useCart ? 4.0 : pm_flatCarryMet(loadKg);
+  const phases     = [];
+  if (d.floor === 1) {
+    const dur = Math.max((1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, 1.0);
+    phases.push({ met: approachMet, durMin: dur, label: useCart ? '평지 이동(카트)' : '평지 이동(하중)' });
+  } else if (d.hasElevator) {
+    phases.push({ met: approachMet, durMin: 1.5 * WALK_FACTOR, label: useCart ? '현관→엘베(카트)' : '현관→엘베(하중)' });
+    phases.push({ met: 1.3, durMin: 0.5 + 0.3 * d.floor, label: '엘리베이터(상행)' });
+    phases.push({ met: pm_flatCarryMet(loadKg), durMin: (1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, label: '호수까지(하중)' });
+  } else {
+    phases.push({ met: approachMet, durMin: 1.5 * WALK_FACTOR, label: useCart ? '현관→계단(카트)' : '현관→계단(하중)' });
+    phases.push({ met: pm_stairCarryMet(loadKg), durMin: 1.5 * floorAbove, label: '계단 오르기(하중)' });
+    phases.push({ met: pm_flatCarryMet(loadKg), durMin: (1.5 + 0.3 * d.pkgCount) * WALK_FACTOR, label: '호수까지(하중)' });
+  }
+  const totalDurMin = Math.max(phases.reduce((s, p) => s + p.durMin, 0), 1.0);
+  const avgMet = totalDurMin > 0
+    ? phases.reduce((s, p) => s + p.met * p.durMin, 0) / totalDurMin : 3.5;
+  return { phases, totalDurMin, avgMet };
+}
+// 단일 배송 예측 에너지(J) — 앱/대시보드 calcPred 와 동일(편도, 하중계수 미적용).
+function pm_calcPred(d, uw) {
+  const loadKg  = d.pkgWeightKg * d.pkgCount;
+  const { phases } = pm_delivPhases(d);
+  let totalE = 0;
+  for (const ph of phases) {
+    const isStairCarry = ph.label === '계단 오르기(하중)';
+    const isCart       = ph.label.includes('카트');
+    const isCarry      = ph.label.includes('하중');
+    const Cload = (!isStairCarry && !isCart && isCarry && loadKg > 0)
+      ? 1 + (0.5 * loadKg / uw) : 1.0;   // Soule & Goldman(1969)
+    totalE += ph.met * Cload * uw * (ph.durMin / 60) * 4184;
+  }
+  return Math.round(totalE);
+} 
+function pm_bodyW() {
+  let w = 0;
+  try { w = parseFloat(localStorage.getItem('courier_weight_kg') || '0'); } catch (e) {}
+  if (w && w > 0) return w;
+  return 66;    
+}
+function pm_buildingPredKcal(boxes, bodyW) {
+  if (!boxes || !boxes.length) return 0;
+  const W = bodyW || (typeof SIM!=='undefined' && SIM.W) || 66;
+  const E  = (met, min) => met * W * (min / 60) * 4184;
+  const Ec = (met, min, loadKg) => { const C = (loadKg>0)?1+(0.5*loadKg/W):1.0; return met * C * W * (min/60) * 4184; };
+  const byFloor = {};
+  boxes.forEach(b => {
+    const f = +b.floor || 1;
+    if (!byFloor[f]) byFloor[f] = { floor: f, hasElevator: !!b.hasElevator, boxes: 0, wt: 0 };
+    byFloor[f].boxes += 1;
+    byFloor[f].wt    += (+b.pkgWeightKg || 0);
+    byFloor[f].hasElevator = byFloor[f].hasElevator || !!b.hasElevator;
+  });
+  const floors = Object.values(byFloor).sort((a, b) => a.floor - b.floor);
+  const totLoad = boxes.reduce((s, b) => s + (+b.pkgWeightKg || 0), 0);
+  const useCart = totLoad >= CART_KG;
+  const approachMet = useCart ? 4.0 : pm_flatCarryMet(totLoad);
+  const hasElev  = floors.some(f => f.hasElevator);
+  const maxFloor = Math.max(...floors.map(f => f.floor));
+  let J = 0;
+  if (maxFloor === 1) {
+    const min = Math.max((1.5 + 0.15 * floors[0].boxes) * WALK_FACTOR, 1.0);
+    J += useCart ? E(approachMet, min) : Ec(approachMet, min, totLoad);
+    return J / 4184;
+  }
+  if (hasElev) {
+    J += useCart ? E(approachMet, 1.5 * WALK_FACTOR) : Ec(approachMet, 1.5 * WALK_FACTOR, totLoad);
+    J += E(1.3, 0.5 + 0.3 * maxFloor);
+    floors.forEach(f => { J += Ec(pm_flatCarryMet(f.wt), (1.5 + 0.15 * f.boxes) * WALK_FACTOR, f.wt); });
+    return J / 4184;
+  }
+  J += useCart ? E(approachMet, 1.5 * WALK_FACTOR) : Ec(approachMet, 1.5 * WALK_FACTOR, totLoad);
+  floors.forEach(f => {
+    const fa = Math.max(f.floor - 1, 0);
+    J += E(pm_stairCarryMet(f.wt), 1.5 * fa);
+    J += Ec(pm_flatCarryMet(f.wt), (1.5 + 0.15 * f.boxes) * WALK_FACTOR, f.wt);
+  });
+  return J / 4184;
+}
+ 
+function metKcalForBox(box, bodyW){
+  const w = +box.pkgWeightKg || 0;
+  const floor = +box.floor || 1;
+  const hasElev = !!box.hasElevator;
+  const climbF = Math.max(0, floor - 1); 
+  const tApproach = 30, tHallway = 25, tFloorUp = 22, tFloorDn = 12;
+  const tElevWait = 30, tElevMove = 4, tElevDoor = 8;
+  const tService = 60, tReturn = 25;
+  const E = (met, sec) => met * bodyW * (sec / 3600);
+
+  let k = 0;
+  // ① 차량 → 입구 (적재)
+  k += E(_metWalkLoad(w), tApproach);
+  // ② 로비/복도 (적재)
+  k += E(_metWalkLoad(w), tHallway);
+  // ③ 위층 이동 (적재)
+  if (climbF > 0) {
+    if (hasElev) k += E(MET_2011.elevator, tElevWait + climbF*tElevMove + tElevDoor);
+    else         k += E(_metStairLoad(w), climbF * tFloorUp);
+  }
+  // ④ 인계 (서서 작업)
+  k += E(MET_2011.standing, tService);
+  // ⑤ 위층 → 1층 (빈손)
+  if (climbF > 0) {
+    if (hasElev) k += E(MET_2011.elevator, climbF*tElevMove + tElevDoor);
+    else         k += E(MET_2011.stairDown, climbF * tFloorDn);
+  }
+  // ⑥ 입구 → 차량 (빈손)
+  k += E(MET_2011.walkEmpty, tReturn);
+  return k;
+}
+ 
+const DELIVERY_BOXES = {};
+
+// ── 실측 에너지 레이어  
+const MEASURED_KCAL = {};
+
+// 근무기록 배열에서 건물별 실측 kcal 맵을 채운다.
+function ingestMeasuredRecords(recs){
+  if(!Array.isArray(recs)) return false;
+  // 날짜별 최신 기록만 사용
+  const byDate={};
+  recs.forEach(r=>{ if(r&&r.date){ const ex=byDate[r.date]; if(!ex||(r.savedAt||'')>(ex.savedAt||'')) byDate[r.date]=r; } });
+  let any=false;
+  Object.values(byDate).forEach(rec=>{
+    (rec.deliveries||[]).forEach(p=>{
+      if(p.status!=='done') return;
+      const aJ=+p.actualJ||0; if(aJ<=0) return;
+      const bldg=_normBldg(_extractBuildingFromAddr(p.addr||''));
+      if(!bldg) return;
+      if(!MEASURED_KCAL[bldg]) MEASURED_KCAL[bldg]={kcal:0,boxes:0,measured:false};
+      MEASURED_KCAL[bldg].kcal += aJ/4184;
+      MEASURED_KCAL[bldg].boxes += 1;
+      if(p.measured) MEASURED_KCAL[bldg].measured = true;
+      any=true;
+    });
+  });
+  return any;
+}
+
+// 주소 → 건물명(앞부분) 추출 — 호/동/실/층 앞을 자른다.
+function _extractBuildingFromAddr(addr){
+  if(!addr) return '';
+  const m=String(addr).match(/^(.+?)\s*\d+[호동실층]/);
+  return (m?m[1]:String(addr)).trim();
+}
+ 
+async function loadMeasuredRecords(){
+  // 서버 URL: selected_dataset → URL 파라미터 → dashboard_srv_url 순
+  let srvUrl='';
+  try{ const sel=JSON.parse(localStorage.getItem('selected_dataset')||'null'); if(sel&&sel.srvUrl) srvUrl=sel.srvUrl; }catch(e){}
+  if(!srvUrl){ const p=new URLSearchParams(location.search); srvUrl=p.get('srv')||''; }
+  if(!srvUrl){ srvUrl=(localStorage.getItem('dashboard_srv_url')||'').replace(/\/$/,''); }
+
+  let got=false;
+  if(srvUrl){
+    try{
+      const r=await fetch(srvUrl.replace(/\/$/,'')+'/records',{headers:{'ngrok-skip-browser-warning':'true'},signal:AbortSignal.timeout(8000)});
+      if(r.ok){ const d=await r.json(); got=ingestMeasuredRecords(Array.isArray(d)?d:[]); }
+    }catch(e){}
+  }
+  // 서버 미연결/실패 시 같은 브라우저 로컬 기록(wl_log) 사용
+  if(!got){
+    try{ const log=JSON.parse(localStorage.getItem('wl_log')||'[]'); got=ingestMeasuredRecords(log); }catch(e){}
+  } 
+  try{
+    const sync=JSON.parse(localStorage.getItem('heatmap_delivery_sync')||'{}');
+    Object.entries(sync).forEach(([rawB,v])=>{
+      const aJ=+ (v&&v.actualJ) || 0; if(aJ<=0) return;
+      const bldg=_normBldg(rawB); if(!bldg) return;
+      MEASURED_KCAL[bldg]={kcal:aJ/4184, boxes:(v.done||0), measured:true};
+      got=true;
+    });
+  }catch(e){}
+  if(got){ 
+    DATA.forEach(d=>{
+      const mk=MEASURED_KCAL[d.building];
+      if(mk && mk.kcal>0){ d.measuredKcal=mk.kcal; d.measuredFlag=mk.measured; }
+    });
+    try{ if(typeof buildHeatCircles==='function') buildHeatCircles(); }catch(e){}
+    try{ if(typeof rebuildBubbles==='function')   rebuildBubbles(); }catch(e){}
+    try{ if(typeof rebuildRanking==='function')   rebuildRanking(); }catch(e){}
+    try{ if(typeof renderDeliveryList==='function') renderDeliveryList(); }catch(e){}
+  }
+  return got;
+} 
+function compendiumBuildingKcal(d, bodyW){
+  const list = DELIVERY_BOXES[d.building];
+  if(!list || !list.length) return 0;
+  return pm_buildingPredKcal(list, bodyW || pm_bodyW());
+}
+ 
+function liveBuildingKcal(d){
+  if(typeof d.measuredKcal === 'number' && d.measuredKcal > 0) return d.measuredKcal;
+  if(datasetLoaded && typeof d.actualKcal === 'number') return d.actualKcal;
+  return d.mean_kcal;
+}
+
+function updateDatasetBanner(company, date, boxes){
+  let el=document.getElementById('dataset-banner');
+  if(!el){
+    el=document.createElement('div');
+    el.id='dataset-banner';
+    el.style.cssText='position:fixed;top:calc(56px + env(safe-area-inset-top, 0px));left:50%;transform:translateX(-50%);z-index:650;'
+      +'background:#111827;color:#fff;padding:7px 16px;border-radius:20px;font-size:12px;'
+      +'font-weight:700;box-shadow:0 3px 12px rgba(0,0,0,.25);font-family:inherit;white-space:nowrap';
+    document.body.appendChild(el);
+  }
+  const co = company || '—';
+  const icon = co==='쿠팡' ? '📦' : co==='대한통운' ? '🚛' : '📍';
+  el.textContent = `${icon} ${co} · ${date||'—'} · 총 ${boxes||0}박스`;
+}
+
+async function loadSelectedDataset(){
+  let sel=null;
+  try{ sel=JSON.parse(localStorage.getItem('selected_dataset')||'null'); }catch(e){}
+
+  // 1순위: 앱이 같은 브라우저에서 넘긴 부하맵 (즉시 반영)
+  let loadMap=null;
+  try{ loadMap=JSON.parse(localStorage.getItem('heatmap_dataset_load')||'null'); }catch(e){}
+  if(loadMap && loadMap.buildings){
+    if(applyDatasetLoad(loadMap)) return;
+  }
+ 
+  const params=new URLSearchParams(location.search);
+  const company = params.get('company') || (sel&&sel.company);
+  const date    = params.get('date')    || (sel&&sel.date);
+  const srvUrl  = params.get('srv')     || (sel&&sel.srvUrl) || '';
+  if(!company || !date || !srvUrl) return;
+  try{
+    const u=`${srvUrl}/deliveries?company=${encodeURIComponent(company)}&date=${encodeURIComponent(date)}`;
+    const r=await fetch(u,{headers:{'ngrok-skip-browser-warning':'true'},signal:AbortSignal.timeout(8000)});
+    if(!r.ok) return;
+    const data=await r.json();
+    const boxes=(data&&data.boxes)||[];
+    const byBldg={};
+    boxes.forEach(b=>{
+      const k=b.building; if(!k) return;
+      if(!byBldg[k]) byBldg[k]={count:0,totWeight:0,floorMax:1,hasElevator:false,boxes:[]};
+      const cnt = +b.pkgCount||1;
+      const w   = +b.pkgWeightKg||0;
+      for(let i=0;i<cnt;i++){
+        byBldg[k].boxes.push({pkgWeightKg:w, floor:+b.floor||1, hasElevator:!!b.hasElevator});
+      }
+      byBldg[k].count      += cnt;
+      byBldg[k].totWeight  += w*cnt;
+      byBldg[k].floorMax    = Math.max(byBldg[k].floorMax,+b.floor||1);
+      byBldg[k].hasElevator = byBldg[k].hasElevator || !!b.hasElevator;
+    });
+    applyDatasetLoad({company,date,buildings:byBldg});
+  }catch(e){ /* 서버 미연결 시 기본 시뮬 데이터 유지 */ }
+}
+ 
+setTimeout(loadSelectedDataset, 900); 
+setTimeout(loadMeasuredRecords, 1400);
+setInterval(loadMeasuredRecords, 30000);
+window.addEventListener('storage', (e)=>{
+  if(e.key==='heatmap_dataset_load' || e.key==='selected_dataset') loadSelectedDataset();
+  if(e.key==='wl_log' || e.key==='heatmap_delivery_sync') loadMeasuredRecords();
+});
+</script>
+</body>
+</html>
